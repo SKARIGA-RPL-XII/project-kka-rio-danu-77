@@ -1,78 +1,41 @@
-import Image from "next/image";
-import { Geist, Geist_Mono } from "next/font/google";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// frontend/pages/index.js
+import Link from "next/link";
 
 export default function Home() {
   return (
-    <div
-      className={`${geistSans.className} ${geistMono.className} flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black`}
-    >
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the index.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
+    <div className="min-h-screen flex items-center justify-center bg-[url('/spain-bg-large.png')] bg-cover bg-center">
+      <div className="bg-white/90 rounded-3xl shadow-2xl max-w-4xl w-full mx-4 md:mx-8 grid grid-cols-1 md:grid-cols-2">
+        {/* LEFT: hero */}
+        <div className="p-8 md:p-12 flex flex-col justify-center gap-6">
+          <img src="/logo-miespanol.png" alt="MiEspanol" className="w-36 mx-auto" />
+          <h1 className="text-3xl md:text-4xl font-extrabold text-center">MiEspanol</h1>
+          <p className="text-center text-gray-600 max-w-prose mx-auto">
+            Belajar Bahasa Spanyol khusus untuk orang Indonesia materi singkat, latihan interaktif, dan minigame buat bikin belajar jadi seru.
+          </p>
+
+          <div className="flex justify-center gap-4 mt-2">
+            <Link href="/login" className="px-12 py-3 rounded-full bg-orange-500 text-white font-semibold shadow hover:bg-orange-600 transition">
+              Mulai Belajar
+            </Link>
+          </div>
+
+          <p className="text-xs text-center text-gray-400 mt-3">
+            Ánimo con tus estudios, porque si te esfuerzas, luego tendrás una chica bonita.
           </p>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs/pages/getting-started?utm_source=create-next-app&utm_medium=default-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        {/* RIGHT: fitur singkat / visual */}
+        <div className="hidden md:flex items-center justify-center p-8">
+          <div className="text-center">
+            <h3 className="text-lg font-semibold mb-3">Fitur Utama</h3>
+            <ul className="text-sm text-gray-600 space-y-2 text-left">
+              <li>• Pelajaran terstruktur & modul cepat</li>
+              <li>• Minigame interaktif untuk latihan</li>
+              <li>• Rekomendasi level & progress tracking</li>
+            </ul>
+          </div>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
