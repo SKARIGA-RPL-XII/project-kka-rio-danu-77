@@ -8,22 +8,37 @@ const fs = require("fs");
 const app = express();
 const PORT = process.env.PORT || 4000;
 
-// === uploads dir (public) ===
-// uploads will be served at: http://localhost:PORT/uploads/...
-const uploadsDir = path.join(__dirname, "..", "public", "uploads", "courses");
+const publicDir = path.join(__dirname, "..", "public");
+const uploadsDir = path.join(publicDir, "uploads");
+const requiredDirs = [
+  path.join(uploadsDir, "courses"),
+  path.join(uploadsDir, "lessons"),
+  path.join(uploadsDir, "minigames"),
+  path.join(uploadsDir, "avatars"),
+];
 
-// ensure uploads dir exists
+// pastikan folder upload ada
 try {
+  if (!fs.existsSync(publicDir)) {
+    fs.mkdirSync(publicDir, { recursive: true });
+  }
+
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
-    console.log("Created uploads dir:", uploadsDir);
+  }
+
+  for (const dir of requiredDirs) {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+      console.log("Created uploads dir:", dir);
+    }
   }
 } catch (e) {
   console.error("Cannot create uploads dir:", e);
   process.exit(1);
 }
 
-// === middleware ===
+// middleware umum
 app.use(
   cors({
     origin: true,
@@ -31,16 +46,14 @@ app.use(
   })
 );
 
-// increase limits a bit for file metadata, but file uploads handled by multer in routes
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
-// serve uploads with permissive headers so browser can load images from different port/origin
+// serve file upload
 app.use(
   "/uploads",
   (req, res, next) => {
     res.setHeader("Access-Control-Allow-Origin", "*");
-    // allow images to be used across origins
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
     res.setHeader(
       "Access-Control-Allow-Headers",
@@ -48,19 +61,18 @@ app.use(
     );
     next();
   },
-  express.static(path.join(__dirname, "..", "public", "uploads"))
+  express.static(uploadsDir)
 );
 
-// simple healthcheck
+// healthcheck
 app.get("/api/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// === safe loader for route modules ===
+// safe loader route
 function safeLoadRoute(routePath) {
   try {
     const modul = require(routePath);
-    // if the module exports a router directly, use it
     if (typeof modul === "function" || typeof modul === "object") return modul;
-    // otherwise create placeholder
+
     const r = express.Router();
     r.use((req, res) => res.status(501).json({ error: "Route module invalid" }));
     return r;
@@ -74,19 +86,20 @@ function safeLoadRoute(routePath) {
   }
 }
 
-// === mount API routes (use safeLoadRoute so server won't crash if file missing) ===
-// adjust paths if your files are elsewhere
+// routes
 app.use("/api/auth", safeLoadRoute("./routes/auth.routes"));
 app.use("/api/admin/courses", safeLoadRoute("./routes/admin.courses.routes"));
+app.use("/api/admin/materials", safeLoadRoute("./routes/admin.materials.routes"));
 app.use("/api/admin/minigames", safeLoadRoute("./routes/admin.minigames.routes"));
+app.use("/api/minigames", safeLoadRoute("./routes/minigames.routes"));
 app.use("/api/admin/users", safeLoadRoute("./routes/admin.users.routes"));
 app.use("/api/admin/dashboard", safeLoadRoute("./routes/admin.dashboard.routes"));
+app.use("/api/public/minigames", safeLoadRoute("./routes/public.minigames.routes"));
 app.use("/api/public", safeLoadRoute("./routes/public.routes"));
 app.use("/api/progress", safeLoadRoute("./routes/progress.routes"));
 
-// 404 for non-API assets
+// 404
 app.use((req, res, next) => {
-  // If request is to /uploads/*, let static have handled it. Otherwise 404
   if (req.path.startsWith("/uploads")) return next();
   res.status(404).json({ error: "Not found", path: req.originalUrl });
 });
@@ -94,7 +107,9 @@ app.use((req, res, next) => {
 // error handler
 app.use((err, req, res, next) => {
   console.error("Unhandled error:", err && err.stack ? err.stack : err);
-  res.status(err.status || 500).json({ message: "Something went wrong", error: err.message || err });
+  res
+    .status(err.status || 500)
+    .json({ message: "Something went wrong", error: err.message || err });
 });
 
 // start

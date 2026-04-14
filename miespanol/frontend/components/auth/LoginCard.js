@@ -82,7 +82,6 @@ export default function LoginCard() {
       const token = data?.token;
       let user = data?.user || null;
 
-      // 🔎 Jika backend tidak kirim user lengkap, ambil dari JWT
       if ((!user || !user.role) && token) {
         const payload = decodeJwtPayload(token);
         if (payload) {
@@ -104,7 +103,6 @@ export default function LoginCard() {
         return;
       }
 
-      // 💾 Simpan auth
       try {
         localStorage.setItem("miespanol_token", token);
         localStorage.setItem("miespanol_user", JSON.stringify(user));
@@ -112,7 +110,6 @@ export default function LoginCard() {
         console.warn("localStorage gagal:", e);
       }
 
-      // 🚀 Redirect berdasarkan role
       if (role === "admin") {
         router.push("/admin/dashboard");
       } else if (role === "user") {
@@ -173,9 +170,21 @@ export default function LoginCard() {
               <button
                 type="button"
                 onClick={() => setShow((s) => !s)}
+                aria-label={show ? "Sembunyikan password" : "Tampilkan password"}
+                title={show ? "Sembunyikan password" : "Tampilkan password"}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
               >
-                {show ? "🙈" : "👁️"}
+                {!show ? (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.477 0 8.268 2.943 9.542 7-1.274 4.057-5.065 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    <circle cx="12" cy="12" r="3" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+                  </svg>
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M3 3l18 18" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M10.477 10.477A3 3 0 0113.523 13.523" />
+                  </svg>
+                )}
               </button>
             </div>
           </div>
