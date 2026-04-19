@@ -14,15 +14,6 @@ const FALLBACK_THUMBNAIL =
     </svg>
   `);
 
-function buildImageSrc(apiRoot, thumbnail) {
-  if (!thumbnail) return FALLBACK_THUMBNAIL;
-  const t = String(thumbnail).trim();
-  if (!t) return FALLBACK_THUMBNAIL;
-  if (/^https?:\/\//i.test(t)) return t;
-  if (t.startsWith("/")) return apiRoot + t;
-  return `${apiRoot}/uploads/minigames/${t}`;
-}
-
 function parseConfig(raw) {
   if (!raw) return {};
   if (typeof raw === "object") return raw;
@@ -40,6 +31,37 @@ function normalizeGamesPayload(data) {
   if (data && Array.isArray(data.rows)) return data.rows;
   if (data && Array.isArray(data.data)) return data.data;
   return [];
+}
+
+function buildImageSrc(apiRoot, input) {
+  const raw =
+    typeof input === "object" && input !== null
+      ? input.thumbnail_url ||
+        input.thumbnail ||
+        input.thumbnailPath ||
+        input.image_url ||
+        input.cover_url ||
+        ""
+      : input || "";
+
+  const t = String(raw).trim();
+  if (!t) return FALLBACK_THUMBNAIL;
+
+  if (/^data:image\//i.test(t)) return t;
+  if (/^blob:/i.test(t)) return t;
+  if (/^https?:\/\//i.test(t)) return t;
+
+  const normalized = t
+    .replace(/\\/g, "/")
+    .replace(/^public\//i, "")
+    .replace(/^\.\//, "")
+    .replace(/^\/+/, "");
+
+  if (normalized.startsWith("uploads/")) {
+    return `${apiRoot}/${normalized}`;
+  }
+
+  return `${apiRoot}/uploads/minigames/${normalized}`;
 }
 
 function getQuestionText(game) {
@@ -61,23 +83,12 @@ function getOptions(game) {
     return cfg.options.slice(0, 4).map(String);
   }
 
-  const candidates = [
-    cfg.option_a ?? cfg.a ?? cfg.A,
-    cfg.option_b ?? cfg.b ?? cfg.B,
-    cfg.option_c ?? cfg.c ?? cfg.C,
-    cfg.option_d ?? cfg.d ?? cfg.D,
-  ];
-
-  if (candidates.every((v) => typeof v !== "undefined" && v !== null && String(v).trim() !== "")) {
-    return candidates.map((v) => String(v));
-  }
-
   return [
-    game?.option_a || "Opsi A",
-    game?.option_b || "Opsi B",
-    game?.option_c || "Opsi C",
-    game?.option_d || "Opsi D",
-  ];
+    cfg.option_a ?? cfg.a ?? "Opsi A",
+    cfg.option_b ?? cfg.b ?? "Opsi B",
+    cfg.option_c ?? cfg.c ?? "Opsi C",
+    cfg.option_d ?? cfg.d ?? "Opsi D",
+  ].map(String);
 }
 
 function getCorrectAnswer(game) {
@@ -86,17 +97,18 @@ function getCorrectAnswer(game) {
     cfg.correct_answer ??
     cfg.correctAnswer ??
     cfg.answer_correct ??
+    cfg.correct_option ??
     game?.correct_answer ??
     game?.correctAnswer ??
+    game?.correct_option ??
     "A";
 
   const val = String(raw).trim().toUpperCase();
-  if (["A", "B", "C", "D"].includes(val)) return val;
-  return "A";
+  return ["A", "B", "C", "D"].includes(val) ? val : "A";
 }
 
 function mapChoiceToIndex(choice) {
-  return { A: 0, B: 1, C: 2, D: 3 }[choice] ?? 0;
+  return { A: 0, B: 1, C: 2, D: 3 }[String(choice).trim().toUpperCase()] ?? 0;
 }
 
 function MiniBadge({ children }) {
@@ -104,6 +116,16 @@ function MiniBadge({ children }) {
     <span className="inline-flex items-center rounded-full bg-orange-100 px-3 py-1 text-xs font-semibold text-orange-700">
       {children}
     </span>
+  );
+}
+
+function StatCard({ label, value, hint }) {
+  return (
+    <div className="rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="text-xs text-gray-500">{label}</div>
+      <div className="mt-1 text-2xl font-black text-gray-900">{value}</div>
+      {hint ? <div className="mt-1 text-xs text-gray-500">{hint}</div> : null}
+    </div>
   );
 }
 
@@ -115,53 +137,70 @@ export default function MinigamesPage() {
   const [selected, setSelected] = useState(null);
   const [submitted, setSubmitted] = useState(false);
   const [result, setResult] = useState(null);
-  const [score, setScore] = useState(0);
-  const [completedIds, setCompletedIds] = useState([]);
+  const [points, setPoints] = useState(0);
+  const [level, setLevel] = useState(1);
   const [attemptsMap, setAttemptsMap] = useState({});
+  const [user, setUser] = useState(null);
 
   const token = useMemo(() => {
     if (typeof window === "undefined") return null;
     return getToken?.() || localStorage.getItem("miespanol_token");
   }, []);
 
-  const user = useMemo(() => {
-    if (typeof window === "undefined") return null;
+  useEffect(() => {
     try {
-      const raw = getUser?.() || localStorage.getItem("miespanol_user");
-      return raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : null;
+      const cached = getUser?.();
+      if (cached) {
+        setUser(cached);
+      } else {
+        const raw = localStorage.getItem("miespanol_user");
+        if (raw) setUser(JSON.parse(raw));
+      }
     } catch {
-      return null;
+      setUser(null);
     }
   }, []);
 
   useEffect(() => {
     async function fetchData() {
       setLoading(true);
+
       try {
-        const [gameRes, progressRes] = await Promise.allSettled([
-          fetch(`${API_ROOT}/api/public/minigames`),
-          token
-            ? fetch(`${API_ROOT}/api/minigames/progress`, {
-                headers: { Authorization: `Bearer ${token}` },
-              })
-            : Promise.resolve(null),
-        ]);
+        const gameEndpoints = [`${API_ROOT}/api/minigames/public`];
+        const progressEndpoints = token ? [`${API_ROOT}/api/minigames/progress`] : [];
 
         let gamesData = null;
-        if (gameRes.status === "fulfilled" && gameRes.value?.ok) {
-          gamesData = await gameRes.value.json().catch(() => null);
+        for (const url of gameEndpoints) {
+          try {
+            const res = await fetch(url);
+            if (res.ok) {
+              gamesData = await res.json().catch(() => null);
+              break;
+            }
+          } catch {}
         }
 
         const list = normalizeGamesPayload(gamesData).filter((g) => {
-          const st = String(g?.status || "").toLowerCase();
+          const st = String(g?.status || "").trim().toLowerCase();
           return !st || st === "published";
         });
 
         setGames(list);
 
-        if (progressRes.status === "fulfilled" && progressRes.value?.ok) {
-          const progressData = await progressRes.value.json().catch(() => null);
+        let progressData = null;
+        for (const url of progressEndpoints) {
+          try {
+            const res = await fetch(url, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+              progressData = await res.json().catch(() => null);
+              break;
+            }
+          } catch {}
+        }
 
+        if (progressData) {
           const attempts = Array.isArray(progressData?.attempts) ? progressData.attempts : [];
           const map = {};
           attempts.forEach((a) => {
@@ -169,14 +208,15 @@ export default function MinigamesPage() {
           });
 
           setAttemptsMap(map);
-          setCompletedIds(Array.isArray(progressData?.completed_ids) ? progressData.completed_ids : []);
-          setScore(Number(progressData?.points || 0));
+          setPoints(Number(progressData?.points || 0));
+          setLevel(Number(progressData?.level || 1));
         } else {
           setAttemptsMap({});
-          setCompletedIds([]);
-          setScore(0);
+          setPoints(0);
+          setLevel(1);
         }
 
+        setActiveIndex(0);
         setSelected(null);
         setSubmitted(false);
         setResult(null);
@@ -194,16 +234,8 @@ export default function MinigamesPage() {
   useEffect(() => {
     if (!games.length) return;
 
-    const firstUnansweredIndex = games.findIndex((g) => {
-      const attempt = attemptsMap[g.id];
-      return !attempt;
-    });
-
-    if (firstUnansweredIndex >= 0) {
-      setActiveIndex(firstUnansweredIndex);
-    } else {
-      setActiveIndex(0);
-    }
+    const firstUnansweredIndex = games.findIndex((g) => !attemptsMap[g.id]);
+    setActiveIndex(firstUnansweredIndex >= 0 ? firstUnansweredIndex : 0);
   }, [games, attemptsMap]);
 
   useEffect(() => {
@@ -220,7 +252,7 @@ export default function MinigamesPage() {
         selectedIndex: idx,
         correctIndex: mapChoiceToIndex(getCorrectAnswer(current)),
         message: saved.is_correct
-          ? "Soal ini sudah dijawab benar."
+          ? "Jawaban ini sudah tersimpan."
           : "Soal ini sudah dijawab sebelumnya.",
       });
     } else {
@@ -232,20 +264,40 @@ export default function MinigamesPage() {
 
   const activeGame = games[activeIndex] || null;
   const options = activeGame ? getOptions(activeGame) : [];
-  const correctAnswer = activeGame ? getCorrectAnswer(activeGame) : "A";
-  const correctIndex = mapChoiceToIndex(correctAnswer);
+  const correctIndex = activeGame ? mapChoiceToIndex(getCorrectAnswer(activeGame)) : 0;
   const currentAttempt = activeGame ? attemptsMap[activeGame.id] : null;
+  const completedCount = Object.keys(attemptsMap).length;
+  const finishedAll = games.length > 0 && completedCount >= games.length;
+  const thumbnailSrc = activeGame ? buildImageSrc(API_ROOT, activeGame) : FALLBACK_THUMBNAIL;
+
+  function handlePick(index) {
+    if (submitted || currentAttempt) return;
+    setSelected(index);
+  }
+
+  function goNext() {
+    if (activeIndex < games.length - 1) {
+      setActiveIndex((v) => v + 1);
+    }
+  }
+
+  function goPrev() {
+    if (activeIndex > 0) {
+      setActiveIndex((v) => v - 1);
+    }
+  }
 
   function resetCurrent() {
     if (currentAttempt) {
-      setSelected(mapChoiceToIndex(currentAttempt.selected_answer));
+      const idx = mapChoiceToIndex(currentAttempt.selected_answer);
+      setSelected(idx);
       setSubmitted(true);
       setResult({
         isCorrect: !!currentAttempt.is_correct,
-        selectedIndex: mapChoiceToIndex(currentAttempt.selected_answer),
+        selectedIndex: idx,
         correctIndex,
         message: currentAttempt.is_correct
-          ? "Soal ini sudah dijawab benar."
+          ? "Jawaban ini sudah tersimpan."
           : "Soal ini sudah dijawab sebelumnya.",
       });
       return;
@@ -254,24 +306,6 @@ export default function MinigamesPage() {
     setSelected(null);
     setSubmitted(false);
     setResult(null);
-  }
-
-  function nextGame() {
-    const nextIndex = activeIndex + 1;
-    if (nextIndex < games.length) {
-      setActiveIndex(nextIndex);
-      return;
-    }
-
-    setResult({
-      done: true,
-      message: "Semua minigame selesai. Keren!",
-    });
-  }
-
-  function handlePick(index) {
-    if (submitted || currentAttempt) return;
-    setSelected(index);
   }
 
   async function handleCheck() {
@@ -296,8 +330,8 @@ export default function MinigamesPage() {
       }
 
       const data = await res.json().catch(() => null);
-
       const attempt = data?.attempt || null;
+
       if (attempt) {
         setAttemptsMap((prev) => ({
           ...prev,
@@ -305,21 +339,18 @@ export default function MinigamesPage() {
         }));
       }
 
-      if (typeof data?.points === "number") {
-        setScore(data.points);
-      }
+      if (typeof data?.points === "number") setPoints(data.points);
+      if (typeof data?.level === "number") setLevel(data.level);
 
       const isCorrect = !!(data?.is_correct ?? attempt?.is_correct);
-      const answeredIndex = selected;
-      const nextResult = {
-        isCorrect,
-        selectedIndex: answeredIndex,
-        correctIndex,
-        message: isCorrect ? "Benar! Mantap." : "Belum tepat, lanjut ke soal berikutnya.",
-      };
 
       setSubmitted(true);
-      setResult(nextResult);
+      setResult({
+        isCorrect,
+        selectedIndex: selected,
+        correctIndex,
+        message: isCorrect ? "Benar! Poin bertambah." : "Belum tepat. Lanjut ke soal berikutnya.",
+      });
     } catch (err) {
       alert(err.message || "Gagal menyimpan jawaban");
       console.error(err);
@@ -375,38 +406,45 @@ export default function MinigamesPage() {
     );
   }
 
-  const finishedAll = games.length > 0 && games.every((g) => attemptsMap[g.id]);
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#fff7ed] via-[#fffaf5] to-[#f8f5ef]">
       <div className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
-        <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="rounded-[2rem] bg-gradient-to-r from-orange-500 to-amber-500 p-8 text-white shadow-lg w-full">
-            <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
-              <div>
-                <h1 className="text-4xl font-black">Minigames</h1>
-                <p className="mt-2 text-white/90">
-                  Pilih jawaban yang benar dari 4 opsi yang tersedia.
-                </p>
-              </div>
+        <div className="mb-6 rounded-[2rem] bg-gradient-to-r from-orange-500 to-amber-500 p-8 text-white shadow-lg">
+          <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h1 className="text-4xl font-black">Minigames</h1>
+              <p className="mt-2 text-white/90">
+                Pilih jawaban yang benar dari 4 opsi yang tersedia.
+              </p>
+            </div>
 
-              <div className="mt-4 md:mt-0 flex flex-wrap gap-3">
-                <div className="rounded-2xl bg-white/15 px-4 py-2 backdrop-blur">
-                  <div className="text-xs text-white/80">Pemain</div>
-                  <div className="font-semibold">{user?.name || "User"}</div>
-                </div>
-                <div className="rounded-2xl bg-white/15 px-4 py-2 backdrop-blur">
-                  <div className="text-xs text-white/80">Skor</div>
-                  <div className="text-2xl font-black">{score}</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => router.push("/home")}
-                  className="rounded-2xl bg-white px-4 py-2 font-semibold text-orange-600 shadow-sm transition hover:shadow-md"
-                >
-                  Home
-                </button>
+            <div className="mt-4 md:mt-0 flex flex-wrap gap-3">
+              <div className="rounded-2xl bg-white/15 px-4 py-2 backdrop-blur">
+                <div className="text-xs text-white/80">Pemain</div>
+                <div className="font-semibold">{user?.name || "User"}</div>
               </div>
+              <div className="rounded-2xl bg-white/15 px-4 py-2 backdrop-blur">
+                <div className="text-xs text-white/80">Poin</div>
+                <div className="text-2xl font-black">{points}</div>
+              </div>
+              <div className="rounded-2xl bg-white/15 px-4 py-2 backdrop-blur">
+                <div className="text-xs text-white/80">Level</div>
+                <div className="text-2xl font-black">{level}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => router.push("/home")}
+                className="rounded-2xl bg-white px-4 py-2 font-semibold text-orange-600 shadow-sm transition hover:shadow-md"
+              >
+                Home
+              </button>
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="rounded-2xl bg-white px-4 py-2 font-semibold text-red-600 shadow-sm transition hover:shadow-md"
+              >
+                Logout
+              </button>
             </div>
           </div>
         </div>
@@ -415,7 +453,7 @@ export default function MinigamesPage() {
           <div className="rounded-[2rem] border bg-white p-8 shadow-sm text-center">
             <h2 className="text-2xl font-black text-gray-900">Semua soal sudah selesai</h2>
             <p className="mt-2 text-sm text-gray-500">
-              Skor kamu tersimpan. Saat balik ke halaman ini, soal yang sudah dijawab tidak akan mengulang.
+              Poin dan level tersimpan. Saat dibuka lagi, soal yang sudah dijawab tidak akan mengulang.
             </p>
 
             <div className="mt-6 flex flex-wrap justify-center gap-3">
@@ -445,14 +483,20 @@ export default function MinigamesPage() {
 
                 <div className="text-sm text-gray-500">
                   Progress:{" "}
-                  {Math.round(((activeIndex + (submitted || currentAttempt ? 1 : 0)) / games.length) * 100)}%
+                  {Math.round(
+                    ((activeIndex + (submitted || currentAttempt ? 1 : 0)) / games.length) * 100
+                  )}
+                  %
                 </div>
               </div>
 
               <div className="mt-5 overflow-hidden rounded-[1.75rem] border bg-gray-50">
                 <img
-                  src={buildImageSrc(API_ROOT, activeGame.thumbnail_url || activeGame.thumbnail || "")}
+                  src={thumbnailSrc}
                   alt={activeGame.title}
+                  onError={(e) => {
+                    e.currentTarget.src = FALLBACK_THUMBNAIL;
+                  }}
                   className="h-64 w-full object-cover"
                 />
               </div>
@@ -466,7 +510,9 @@ export default function MinigamesPage() {
 
               <div className="mt-5 rounded-3xl bg-orange-50 p-5">
                 <div className="text-sm font-bold text-gray-900">Soal</div>
-                <p className="mt-2 text-base text-gray-700">{getQuestionText(activeGame)}</p>
+                <p className="mt-2 text-base leading-7 text-gray-700">
+                  {getQuestionText(activeGame)}
+                </p>
               </div>
 
               {currentAttempt && (
@@ -490,10 +536,12 @@ export default function MinigamesPage() {
                       className={[
                         "w-full rounded-2xl border px-4 py-4 text-left text-base font-semibold transition",
                         "hover:-translate-y-[1px] hover:shadow-sm",
-                        submitted && isCorrect
-                          ? "border-emerald-400 bg-emerald-50 text-emerald-700"
-                          : isWrongChoice
-                          ? "border-rose-300 bg-rose-50 text-rose-700"
+                        submitted || currentAttempt
+                          ? isCorrect
+                            ? "border-emerald-400 bg-emerald-50 text-emerald-700"
+                            : isWrongChoice
+                            ? "border-rose-300 bg-rose-50 text-rose-700"
+                            : "border-gray-200 bg-white text-gray-900"
                           : isChosen
                           ? "border-orange-400 bg-orange-50 text-orange-700"
                           : "border-gray-200 bg-white text-gray-900 hover:border-orange-200",
@@ -522,12 +570,22 @@ export default function MinigamesPage() {
                 ) : (
                   <button
                     type="button"
-                    onClick={nextGame}
+                    onClick={goNext}
                     className="rounded-2xl bg-orange-500 px-5 py-3 font-semibold text-white transition hover:bg-orange-600"
+                    disabled={activeIndex >= games.length - 1}
                   >
                     {activeIndex < games.length - 1 ? "Soal Berikutnya" : "Selesai"}
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={goPrev}
+                  className="rounded-2xl border bg-white px-5 py-3 font-semibold text-gray-700 transition hover:bg-gray-50"
+                  disabled={activeIndex === 0}
+                >
+                  Soal Sebelumnya
+                </button>
 
                 <button
                   type="button"
@@ -536,43 +594,36 @@ export default function MinigamesPage() {
                 >
                   Ulang Soal
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => router.push("/home")}
+                  className="rounded-2xl border bg-white px-5 py-3 font-semibold text-orange-600 transition hover:bg-orange-50"
+                >
+                  Ke Home
+                </button>
               </div>
 
               {result && !result.done && (
                 <div
                   className={[
                     "mt-5 rounded-2xl p-4 text-sm font-semibold",
-                    result.isCorrect
-                      ? "bg-emerald-50 text-emerald-700"
-                      : "bg-rose-50 text-rose-700",
+                    result.isCorrect ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700",
                   ].join(" ")}
                 >
-                  {result.message}
-                </div>
-              )}
-
-              {result?.done && (
-                <div className="mt-5 rounded-2xl bg-amber-50 p-4 text-sm font-semibold text-amber-700">
                   {result.message}
                 </div>
               )}
             </div>
 
             <div className="space-y-6">
-              <div className="rounded-[2rem] border bg-white p-5 shadow-sm">
-                <h3 className="text-lg font-bold text-gray-900">Ringkasan</h3>
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl bg-orange-50 p-4">
-                    <div className="text-xs text-gray-500">Skor</div>
-                    <div className="mt-1 text-3xl font-black text-orange-600">{score}</div>
-                  </div>
-                  <div className="rounded-2xl bg-amber-50 p-4">
-                    <div className="text-xs text-gray-500">Sisa Soal</div>
-                    <div className="mt-1 text-3xl font-black text-amber-600">
-                      {Math.max(0, games.length - completedIds.length)}
-                    </div>
-                  </div>
-                </div>
+              <div className="grid grid-cols-2 gap-3">
+                <StatCard label="Skor" value={points} hint="Bertambah saat jawaban benar" />
+                <StatCard
+                  label="Sisa Soal"
+                  value={Math.max(0, games.length - completedCount)}
+                  hint="Soal yang belum dijawab"
+                />
               </div>
 
               <div className="rounded-[2rem] border bg-white p-5 shadow-sm">
@@ -582,7 +633,7 @@ export default function MinigamesPage() {
                   <p>
                     2. Tekan <span className="font-semibold text-gray-900">Cek Jawaban</span>.
                   </p>
-                  <p>3. Jika benar, skor bertambah dan jawaban tersimpan.</p>
+                  <p>3. Jawaban benar memberi poin dan level naik otomatis.</p>
                 </div>
               </div>
 
@@ -600,6 +651,21 @@ export default function MinigamesPage() {
                     <span className="font-semibold text-gray-900">Difficulty:</span>{" "}
                     {activeGame.difficulty || 1}
                   </p>
+                </div>
+              </div>
+
+              <div className="rounded-[2rem] border bg-white p-5 shadow-sm">
+                <div className="text-sm font-semibold text-gray-900">Progress Pribadi</div>
+                <div className="mt-3 h-3 w-full rounded-full bg-gray-200">
+                  <div
+                    className="h-3 rounded-full bg-gradient-to-r from-orange-400 to-amber-500 transition-all"
+                    style={{
+                      width: `${Math.max(0, Math.min(100, (completedCount / games.length) * 100))}%`,
+                    }}
+                  />
+                </div>
+                <div className="mt-2 text-xs text-gray-500">
+                  {completedCount} / {games.length} soal selesai
                 </div>
               </div>
             </div>

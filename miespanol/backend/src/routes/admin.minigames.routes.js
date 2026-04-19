@@ -27,7 +27,8 @@ const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadDir),
   filename: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    const base = sanitizeFilename(path.basename(file.originalname, ext)).slice(0, 50) || "file";
+    const base =
+      sanitizeFilename(path.basename(file.originalname, ext)).slice(0, 50) || "file";
     const rnd = crypto.randomBytes(4).toString("hex");
     cb(null, `${Date.now()}-${rnd}-${base}${ext}`);
   },
@@ -95,31 +96,33 @@ function normalizeMinigameRow(row) {
 
   return {
     ...row,
-    status: cfg.status || "draft",
-    thumbnail_url: cfg.thumbnail_url || null,
-    question: cfg.question || "",
-    option_a: cfg.option_a || "",
-    option_b: cfg.option_b || "",
-    option_c: cfg.option_c || "",
-    option_d: cfg.option_d || "",
-    correct_option: normalizeCorrectOption(cfg.correct_option),
+    status: cfg.status || row.status || "draft",
+    thumbnail_url: cfg.thumbnail_url || row.thumbnail_url || row.thumbnail || null,
+    question: cfg.question || row.question || "",
+    option_a: cfg.option_a || row.option_a || "",
+    option_b: cfg.option_b || row.option_b || "",
+    option_c: cfg.option_c || row.option_c || "",
+    option_d: cfg.option_d || row.option_d || "",
+    correct_option: normalizeCorrectOption(cfg.correct_option || row.correct_option || "A"),
   };
 }
 
-function buildConfigFromBody(body, oldConfig = {}) {
-  const current = parseConfig(oldConfig);
+function buildConfigFromBody(body, oldRow = {}) {
+  const current = parseConfig(oldRow.config);
 
-  const status = body.status || current.status || "draft";
-  const question = body.question ?? current.question ?? "";
-  const option_a = body.option_a ?? current.option_a ?? "";
-  const option_b = body.option_b ?? current.option_b ?? "";
-  const option_c = body.option_c ?? current.option_c ?? "";
-  const option_d = body.option_d ?? current.option_d ?? "";
-  const correct_option = normalizeCorrectOption(body.correct_option ?? current.correct_option ?? "A");
+  const status = body.status || current.status || oldRow.status || "draft";
+  const question = body.question ?? current.question ?? oldRow.question ?? "";
+  const option_a = body.option_a ?? current.option_a ?? oldRow.option_a ?? "";
+  const option_b = body.option_b ?? current.option_b ?? oldRow.option_b ?? "";
+  const option_c = body.option_c ?? current.option_c ?? oldRow.option_c ?? "";
+  const option_d = body.option_d ?? current.option_d ?? oldRow.option_d ?? "";
+  const correct_option = normalizeCorrectOption(
+    body.correct_option ?? current.correct_option ?? oldRow.correct_option ?? "A"
+  );
 
   return {
     status,
-    thumbnail_url: current.thumbnail_url || null,
+    thumbnail_url: current.thumbnail_url || oldRow.thumbnail_url || oldRow.thumbnail || null,
     question: String(question).trim(),
     option_a: String(option_a).trim(),
     option_b: String(option_b).trim(),
@@ -220,18 +223,25 @@ router.put("/:id", authMiddleware, adminOnly, upload.single("thumbnail"), async 
       return res.status(400).json({ message: "Soal wajib diisi" });
     }
 
-    const normalizedCorrect = normalizeCorrectOption(req.body.correct_option ?? oldConfig.correct_option);
+    const normalizedCorrect = normalizeCorrectOption(
+      req.body.correct_option ?? oldConfig.correct_option ?? old.correct_option
+    );
     if (!normalizedCorrect) {
       return res.status(400).json({ message: "Jawaban benar harus A, B, C, atau D" });
     }
 
-    const nextConfig = buildConfigFromBody(req.body, oldConfig);
+    const nextConfig = buildConfigFromBody(req.body, old);
 
     if (!nextConfig.question) {
       return res.status(400).json({ message: "Soal wajib diisi" });
     }
 
-    const options = [nextConfig.option_a, nextConfig.option_b, nextConfig.option_c, nextConfig.option_d];
+    const options = [
+      nextConfig.option_a,
+      nextConfig.option_b,
+      nextConfig.option_c,
+      nextConfig.option_d,
+    ];
     if (options.some((v) => !v || !String(v).trim())) {
       return res.status(400).json({ message: "Semua opsi A, B, C, dan D wajib diisi" });
     }
@@ -239,12 +249,14 @@ router.put("/:id", authMiddleware, adminOnly, upload.single("thumbnail"), async 
     let thumbnail_url = nextConfig.thumbnail_url || null;
 
     if (req.file && req.file.filename) {
-      if (oldConfig.thumbnail_url) deleteFileByUrl(oldConfig.thumbnail_url);
+      if (oldConfig.thumbnail_url || old.thumbnail_url) {
+        deleteFileByUrl(oldConfig.thumbnail_url || old.thumbnail_url);
+      }
       thumbnail_url = `/uploads/minigames/${req.file.filename}`;
     }
 
     nextConfig.thumbnail_url = thumbnail_url;
-    nextConfig.status = req.body.status || oldConfig.status || "draft";
+    nextConfig.status = req.body.status || oldConfig.status || old.status || "draft";
     nextConfig.correct_option = normalizedCorrect;
 
     await pool.query(
@@ -282,8 +294,8 @@ router.delete("/:id", authMiddleware, adminOnly, async (req, res) => {
     if (!rows.length) return res.status(404).json({ message: "Minigame tidak ditemukan" });
 
     const cfg = parseConfig(rows[0].config);
-    if (cfg.thumbnail_url) {
-      deleteFileByUrl(cfg.thumbnail_url);
+    if (cfg.thumbnail_url || rows[0].thumbnail_url) {
+      deleteFileByUrl(cfg.thumbnail_url || rows[0].thumbnail_url);
     }
 
     await pool.query("DELETE FROM minigames WHERE id = ?", [id]);

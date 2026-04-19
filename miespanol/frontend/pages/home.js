@@ -23,6 +23,46 @@ function avatarSrc(photo) {
   return `${API_ROOT}/uploads/avatars/${t}`;
 }
 
+function normalizeLearningProgress(data, pointsValue = 0) {
+  if (!data || typeof data !== "object") {
+    return Math.max(0, Math.min(100, Number(pointsValue) % 100));
+  }
+
+  if (typeof data.progress_percent === "number") {
+    const learning = Math.max(0, Math.min(100, Math.round(data.progress_percent)));
+    if (learning > 0) return learning;
+  }
+
+  const rows = Array.isArray(data.progress) ? data.progress : [];
+  if (rows.length > 0) {
+    const sum = rows.reduce((total, row) => total + (Number(row.progress_percent) || 0), 0);
+    const avg = Math.round(sum / rows.length);
+    if (avg > 0) return avg;
+  }
+
+  return Math.max(0, Math.min(100, Number(pointsValue) % 100));
+}
+
+function normalizePointsProgress(data) {
+  if (!data || typeof data !== "object") return { points: 0, level: 1 };
+
+  if (typeof data.points === "number" && typeof data.level === "number") {
+    return {
+      points: Number(data.points || 0),
+      level: Number(data.level || 1),
+    };
+  }
+
+  if (data.points && typeof data.points === "object") {
+    return {
+      points: Number(data.points.points || 0),
+      level: Number(data.points.level || 1),
+    };
+  }
+
+  return { points: 0, level: 1 };
+}
+
 export default function Home() {
   const router = useRouter();
   const [user, setUser] = useState(null);
@@ -63,10 +103,11 @@ export default function Home() {
 
           if (r1.ok) {
             const j = await r1.json();
-            if (j?.user) {
-              setUser(j.user);
+            const u = j?.user || j;
+            if (u) {
+              setUser(u);
               try {
-                localStorage.setItem("miespanol_user", JSON.stringify(j.user));
+                localStorage.setItem("miespanol_user", JSON.stringify(u));
               } catch {}
             }
           } else if (r1.status === 401) {
@@ -79,36 +120,43 @@ export default function Home() {
         }
 
         try {
-          const r2 = await fetch(`${API_ROOT}/api/progress`, {
+          const rProgress = await fetch(`${API_ROOT}/api/progress`, {
             headers: { Authorization: `Bearer ${token}` },
           });
 
-          if (r2.ok) {
-            const jb = await r2.json();
-            const progressRows = Array.isArray(jb.progress) ? jb.progress : [];
+          let progressData = null;
+          if (rProgress.ok) {
+            progressData = await rProgress.json().catch(() => null);
+          }
 
-            if (progressRows.length > 0) {
-              const sum = progressRows.reduce(
-                (s, it) => s + (Number(it.progress_percent) || 0),
-                0
-              );
-              setProgressPercent(Math.round(sum / progressRows.length));
+          try {
+            const rPoints = await fetch(`${API_ROOT}/api/minigames/progress`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+
+            if (rPoints.ok) {
+              const data = await rPoints.json().catch(() => null);
+              const normalized = normalizePointsProgress(data);
+
+              setPoints(normalized.points);
+              setLevel(normalized.level);
+
+              const progressValue = normalizeLearningProgress(progressData, normalized.points);
+              setProgressPercent(progressValue);
             } else {
-              setProgressPercent(0);
+              setPoints(0);
+              setLevel(1);
+              setProgressPercent(normalizeLearningProgress(progressData, 0));
             }
-
-            setPoints(jb.points?.points || 0);
-            setLevel(jb.points?.level || 1);
-          } else {
-            setProgressPercent(0);
+          } catch (e) {
+            console.warn("points fetch failed", e);
             setPoints(0);
             setLevel(1);
+            setProgressPercent(normalizeLearningProgress(progressData, 0));
           }
         } catch (e) {
-          console.warn("progress fetch failed", e);
+          console.warn("learning progress fetch failed", e);
           setProgressPercent(0);
-          setPoints(0);
-          setLevel(1);
         }
       } finally {
         setLoading(false);
@@ -139,11 +187,6 @@ export default function Home() {
 
   if (!user) return null;
 
-  const goToDashboard = () => router.push("/dashboard");
-  const goToProfile = () => router.push("/profile");
-  const goToCourses = () => router.push("/courses");
-  const goToMinigames = () => router.push("/minigames");
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-[#fff7ed] via-[#fffaf5] to-[#f8f5ef]">
       <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">
@@ -151,7 +194,7 @@ export default function Home() {
           <div>
             <p className="text-sm font-medium text-orange-500">MiEspanol</p>
             <h1 className="text-3xl font-black tracking-tight text-gray-900 sm:text-4xl">
-              ¡Hola, {user.name}!
+              Hola, {user.name}
             </h1>
             <p className="mt-2 text-sm text-gray-600 sm:text-base">
               Siap belajar Bahasa Spanyol hari ini?
@@ -183,21 +226,11 @@ export default function Home() {
                   type="button"
                   onClick={() => {
                     setMenuOpen(false);
-                    goToDashboard();
+                    router.push("/dashboard");
                   }}
                   className="w-full rounded-xl px-3 py-2 text-left text-sm transition hover:bg-orange-50"
                 >
                   Dashboard
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMenuOpen(false);
-                    goToProfile();
-                  }}
-                  className="w-full rounded-xl px-3 py-2 text-left text-sm transition hover:bg-orange-50"
-                >
-                  Profil Saya
                 </button>
                 <button
                   type="button"
@@ -290,7 +323,7 @@ export default function Home() {
             </div>
 
             <button
-              onClick={goToCourses}
+              onClick={() => router.push("/courses")}
               className="mt-5 rounded-2xl bg-orange-500 px-5 py-3 font-semibold text-white transition hover:bg-orange-600"
             >
               Mulai Belajar
@@ -315,7 +348,7 @@ export default function Home() {
             </div>
 
             <button
-              onClick={goToMinigames}
+              onClick={() => router.push("/minigames")}
               className="mt-5 rounded-2xl bg-amber-500 px-5 py-3 font-semibold text-white transition hover:bg-amber-600"
             >
               Main Sekarang

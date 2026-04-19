@@ -1,8 +1,10 @@
+// frontend/pages/admin/minigames.js
 import { useEffect, useMemo, useState } from "react";
 import Sidebar from "../../components/admin/AdminSidebar";
 import Topbar from "../../components/admin/AdminTopbar";
 
 const API_ROOT = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+const PAGE_SIZE = 6;
 
 function getAuthToken() {
   if (typeof window === "undefined") return null;
@@ -28,8 +30,8 @@ function buildImageSrc(apiRoot, thumbnail) {
 
 function MiniStat({ label, value, hint }) {
   return (
-    <div className="rounded-2xl border bg-white p-4 shadow-sm">
-      <div className="text-xs text-gray-500">{label}</div>
+    <div className="rounded-3xl border bg-white p-4 shadow-sm">
+      <div className="text-xs font-medium text-gray-500">{label}</div>
       <div className="mt-1 text-2xl font-black text-gray-900">{value}</div>
       {hint ? <div className="mt-1 text-xs text-gray-500">{hint}</div> : null}
     </div>
@@ -37,15 +39,34 @@ function MiniStat({ label, value, hint }) {
 }
 
 function StatusBadge({ status }) {
-  const isPublished = String(status).toLowerCase() === "published";
+  const isPublished = String(status || "").toLowerCase() === "published";
   return (
     <span
-      className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${
-        isPublished ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-      }`}
+      className={[
+        "inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold",
+        isPublished ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
+      ].join(" ")}
     >
       {isPublished ? "Published" : "Draft"}
     </span>
+  );
+}
+
+function PaginationButton({ children, active = false, disabled = false, className = "", ...props }) {
+  return (
+    <button
+      type="button"
+      {...props}
+      disabled={disabled}
+      className={[
+        "rounded-xl px-3 py-2 text-sm font-semibold transition",
+        active ? "bg-orange-500 text-white" : "border bg-white text-gray-700 hover:bg-orange-50",
+        disabled ? "cursor-not-allowed opacity-50 hover:bg-white" : "",
+        className,
+      ].join(" ")}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -53,7 +74,9 @@ export default function AdminMinigamesPage() {
   const token = useMemo(() => getAuthToken(), []);
   const [loading, setLoading] = useState(false);
   const [minigames, setMinigames] = useState([]);
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [form, setForm] = useState({
     id: null,
@@ -74,6 +97,15 @@ export default function AdminMinigamesPage() {
     fetchMinigames();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearchQuery(searchInput.trim().toLowerCase());
+      setCurrentPage(1);
+    }, 200);
+
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   async function fetchMinigames() {
     setLoading(true);
@@ -107,6 +139,7 @@ export default function AdminMinigamesPage() {
       setForm((prev) => ({ ...prev, thumbnailFile: null, thumbnailPreview: null }));
       return;
     }
+
     const preview = URL.createObjectURL(file);
     setForm((prev) => ({ ...prev, thumbnailFile: file, thumbnailPreview: preview }));
   }
@@ -116,6 +149,7 @@ export default function AdminMinigamesPage() {
       if (prev.thumbnailPreview && prev.thumbnailPreview.startsWith("blob:")) {
         URL.revokeObjectURL(prev.thumbnailPreview);
       }
+
       return {
         id: null,
         title: "",
@@ -140,7 +174,7 @@ export default function AdminMinigamesPage() {
       description: item.description || "",
       status: item.status || "draft",
       thumbnailFile: null,
-      thumbnailPreview: buildImageSrc(API_ROOT, item.thumbnail_url || item.thumbnail || ""),
+      thumbnailPreview: buildImageSrc(API_ROOT, item.thumbnail_url || item.thumbnail || "") || null,
       question: item.question || "",
       option_a: item.option_a || "",
       option_b: item.option_b || "",
@@ -148,6 +182,7 @@ export default function AdminMinigamesPage() {
       option_d: item.option_d || "",
       correct_option: String(item.correct_option || "A").toUpperCase(),
     });
+
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -219,25 +254,37 @@ export default function AdminMinigamesPage() {
   }
 
   const filtered = minigames.filter((m) => {
-    const q = search.toLowerCase().trim();
+    const q = searchQuery;
     if (!q) return true;
-    return (
-      String(m.title || "").toLowerCase().includes(q) ||
-      String(m.description || "").toLowerCase().includes(q) ||
-      String(m.question || "").toLowerCase().includes(q) ||
-      String(m.status || "").toLowerCase().includes(q)
-    );
+
+    const title = String(m.title || "").toLowerCase();
+    const desc = String(m.description || "").toLowerCase();
+    const question = String(m.question || "").toLowerCase();
+    const status = String(m.status || "").toLowerCase();
+
+    return title.includes(q) || desc.includes(q) || question.includes(q) || status.includes(q);
   });
 
   const total = minigames.length;
   const published = minigames.filter((m) => String(m.status).toLowerCase() === "published").length;
-  const draft = minigames.filter((m) => String(m.status).toLowerCase() !== "published").length;
+  const draft = total - published;
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * PAGE_SIZE;
+  const paginated = filtered.slice(startIndex, startIndex + PAGE_SIZE);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
     <div className="min-h-screen flex bg-[#f6f6f6]">
       <Sidebar />
 
-      <div className="flex-1 p-8 overflow-auto max-h-screen">
+      <div className="flex-1 max-h-screen overflow-auto p-8">
         <Topbar />
 
         <div className="mx-auto max-w-6xl space-y-6">
@@ -269,7 +316,7 @@ export default function AdminMinigamesPage() {
                   <div>
                     <label className="text-sm font-medium text-gray-700">Judul</label>
                     <input
-                      className="mt-1 w-full rounded-2xl border px-4 py-3 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400"
                       placeholder="Judul minigame"
                       value={form.title}
                       onChange={(e) => setForm({ ...form, title: e.target.value })}
@@ -281,7 +328,7 @@ export default function AdminMinigamesPage() {
                     <label className="text-sm font-medium text-gray-700">Deskripsi</label>
                     <textarea
                       rows={4}
-                      className="mt-1 w-full rounded-2xl border px-4 py-3 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400"
                       placeholder="Deskripsi minigame"
                       value={form.description}
                       onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -292,7 +339,7 @@ export default function AdminMinigamesPage() {
                     <label className="text-sm font-medium text-gray-700">Soal</label>
                     <textarea
                       rows={4}
-                      className="mt-1 w-full rounded-2xl border px-4 py-3 focus:outline-none focus:ring-2 focus:ring-amber-400"
+                      className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400"
                       placeholder="Tulis pertanyaan di sini"
                       value={form.question}
                       onChange={(e) => setForm({ ...form, question: e.target.value })}
@@ -345,7 +392,7 @@ export default function AdminMinigamesPage() {
                       <select
                         value={form.status}
                         onChange={(e) => setForm({ ...form, status: e.target.value })}
-                        className="mt-1 w-full rounded-2xl border px-4 py-3"
+                        className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400"
                       >
                         <option value="draft">Draft</option>
                         <option value="published">Published</option>
@@ -357,7 +404,7 @@ export default function AdminMinigamesPage() {
                       <select
                         value={form.correct_option}
                         onChange={(e) => setForm({ ...form, correct_option: e.target.value })}
-                        className="mt-1 w-full rounded-2xl border px-4 py-3"
+                        className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400"
                         required
                       >
                         <option value="A">A</option>
@@ -384,13 +431,19 @@ export default function AdminMinigamesPage() {
                     </div>
                   )}
 
-                  {form.thumbnailPreview && (
-                    <img
-                      src={form.thumbnailPreview}
-                      alt="preview"
-                      className="h-44 w-full rounded-2xl border object-cover"
-                    />
-                  )}
+                  <div className="overflow-hidden rounded-2xl border bg-white">
+                    {form.thumbnailPreview ? (
+                      <img
+                        src={form.thumbnailPreview}
+                        alt="preview"
+                        className="h-44 w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-44 items-center justify-center text-sm text-gray-500">
+                        Preview thumbnail
+                      </div>
+                    )}
+                  </div>
 
                   <div className="flex gap-2 pt-2">
                     <button
@@ -413,95 +466,146 @@ export default function AdminMinigamesPage() {
 
             <div className="xl:col-span-3">
               <div className="rounded-3xl border bg-white p-6 shadow-sm">
-                <div className="mb-4 flex items-center justify-between">
+                <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                   <div>
                     <h2 className="text-xl font-bold">Daftar Minigames</h2>
                     <p className="mt-1 text-sm text-gray-500">
-                      Tampil dalam kartu yang cocok untuk game.
+                      Cari minigame lalu buka per halaman 6 item.
                     </p>
                   </div>
-                  <div className="text-sm text-gray-500">{filtered.length} item</div>
+
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                    <input
+                      value={searchInput}
+                      onChange={(e) => {
+                        setSearchInput(e.target.value);
+                        setCurrentPage(1);
+                      }}
+                      placeholder="Cari minigame..."
+                      className="w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 md:w-80"
+                    />
+                    <div className="text-sm text-gray-500">{filtered.length} item ditemukan</div>
+                  </div>
                 </div>
 
                 {loading ? (
-                  <div>Memuat…</div>
+                  <div className="rounded-2xl border bg-orange-50 p-6 text-sm text-gray-600">
+                    Memuat…
+                  </div>
                 ) : filtered.length === 0 ? (
-                  <div className="text-sm text-gray-500">Belum ada minigame.</div>
+                  <div className="rounded-2xl border bg-orange-50 p-6 text-sm text-gray-600">
+                    Tidak ada minigame yang cocok dengan pencarian.
+                  </div>
                 ) : (
-                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    {filtered.map((m) => {
-                      const imgSrc = buildImageSrc(API_ROOT, m.thumbnail_url || m.thumbnail || "");
+                  <>
+                    <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                      {paginated.map((m) => {
+                        const imgSrc = buildImageSrc(API_ROOT, m.thumbnail_url || m.thumbnail || "");
 
-                      return (
-                        <div
-                          key={m.id}
-                          className="overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:shadow-md"
-                        >
-                          <div className="relative">
-                            <div className="h-44 bg-gray-100">
-                              {imgSrc ? (
-                                <img
-                                  src={imgSrc}
-                                  alt={m.title}
-                                  className="h-full w-full object-cover"
-                                />
-                              ) : (
-                                <div className="flex h-full items-center justify-center text-sm text-gray-500">
-                                  Tidak ada thumbnail
-                                </div>
-                              )}
-                            </div>
+                        return (
+                          <div
+                            key={m.id}
+                            className="overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:shadow-md"
+                          >
+                            <div className="relative">
+                              <div className="h-44 bg-gray-100">
+                                {imgSrc ? (
+                                  <img
+                                    src={imgSrc}
+                                    alt={m.title}
+                                    className="h-full w-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="flex h-full items-center justify-center text-sm text-gray-500">
+                                    Tidak ada thumbnail
+                                  </div>
+                                )}
+                              </div>
 
-                            <div className="absolute left-3 top-3">
-                              <StatusBadge status={m.status} />
-                            </div>
-                          </div>
-
-                          <div className="p-5">
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="text-xl font-bold text-gray-900">{m.title}</div>
-                                <div className="mt-1 text-xs text-gray-500">ID #{m.id}</div>
+                              <div className="absolute left-3 top-3">
+                                <StatusBadge status={m.status} />
                               </div>
                             </div>
 
-                            <div className="mt-2 text-sm text-gray-700">
-                              <div className="font-semibold text-gray-800">Soal:</div>
-                              <div className="mt-1 line-clamp-3">{m.question || "-"}</div>
-                            </div>
+                            <div className="p-5">
+                              <div className="flex items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-xl font-bold text-gray-900">{m.title}</div>
+                                  <div className="mt-1 text-xs text-gray-500">ID #{m.id}</div>
+                                </div>
+                              </div>
 
-                            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                              <div className="rounded-xl bg-gray-50 p-2">A: {m.option_a || "-"}</div>
-                              <div className="rounded-xl bg-gray-50 p-2">B: {m.option_b || "-"}</div>
-                              <div className="rounded-xl bg-gray-50 p-2">C: {m.option_c || "-"}</div>
-                              <div className="rounded-xl bg-gray-50 p-2">D: {m.option_d || "-"}</div>
-                            </div>
+                              <div className="mt-2 text-sm text-gray-700">
+                                <div className="font-semibold text-gray-800">Soal:</div>
+                                <div className="mt-1 line-clamp-3">{m.question || "-"}</div>
+                              </div>
 
-                            <div className="mt-3 text-xs text-gray-500">
-                              Jawaban benar: {m.correct_option || "-"}
-                            </div>
+                              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                                <div className="rounded-xl bg-gray-50 p-2">A: {m.option_a || "-"}</div>
+                                <div className="rounded-xl bg-gray-50 p-2">B: {m.option_b || "-"}</div>
+                                <div className="rounded-xl bg-gray-50 p-2">C: {m.option_c || "-"}</div>
+                                <div className="rounded-xl bg-gray-50 p-2">D: {m.option_d || "-"}</div>
+                              </div>
 
-                            <div className="mt-5 flex gap-2">
-                              <button
-                                type="button"
-                                className="flex-1 rounded-2xl bg-blue-500 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-600"
-                                onClick={() => startEdit(m)}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                className="flex-1 rounded-2xl bg-red-500 px-4 py-2.5 font-semibold text-white transition hover:bg-red-600"
-                                onClick={() => removeMinigame(m.id)}
-                              >
-                                Hapus
-                              </button>
+                              <div className="mt-3 text-xs text-gray-500">
+                                Jawaban benar: {m.correct_option || "-"}
+                              </div>
+
+                              <div className="mt-5 flex gap-2">
+                                <button
+                                  type="button"
+                                  className="flex-1 rounded-2xl bg-blue-500 px-4 py-2.5 font-semibold text-white transition hover:bg-blue-600"
+                                  onClick={() => startEdit(m)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="flex-1 rounded-2xl bg-red-500 px-4 py-2.5 font-semibold text-white transition hover:bg-red-600"
+                                  onClick={() => removeMinigame(m.id)}
+                                >
+                                  Hapus
+                                </button>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="mt-6 flex flex-col gap-3 border-t pt-5 md:flex-row md:items-center md:justify-between">
+                      <div className="text-sm text-gray-500">
+                        Halaman <span className="font-semibold text-gray-900">{safePage}</span> dari{" "}
+                        <span className="font-semibold text-gray-900">{totalPages}</span>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2">
+                        <PaginationButton
+                          onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                          disabled={safePage === 1}
+                        >
+                          Sebelumnya
+                        </PaginationButton>
+
+                        {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((page) => (
+                          <PaginationButton
+                            key={page}
+                            active={page === safePage}
+                            onClick={() => setCurrentPage(page)}
+                          >
+                            {page}
+                          </PaginationButton>
+                        ))}
+
+                        <PaginationButton
+                          onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                          disabled={safePage === totalPages}
+                        >
+                          Berikutnya
+                        </PaginationButton>
+                      </div>
+                    </div>
+                  </>
                 )}
               </div>
             </div>

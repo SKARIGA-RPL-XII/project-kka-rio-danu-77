@@ -5,10 +5,17 @@ import Sidebar from "../../components/admin/AdminSidebar";
 import Topbar from "../../components/admin/AdminTopbar";
 
 const API_ROOT = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
+const PAGE_SIZE = 5;
 
 function SmallBtn({ children, className = "", type = "button", ...props }) {
   return (
-    <button {...props} type={type} className={"px-3 py-1 rounded text-sm " + className}>
+    <button
+      {...props}
+      type={type}
+      className={
+        "rounded-xl px-3 py-2 text-sm font-semibold transition hover:shadow-sm " + className
+      }
+    >
       {children}
     </button>
   );
@@ -40,17 +47,62 @@ function normalizeCoursesPayload(data) {
   return [];
 }
 
+function MiniStat({ label, value, hint }) {
+  return (
+    <div className="rounded-3xl border bg-white p-4 shadow-sm">
+      <div className="text-xs font-medium text-gray-500">{label}</div>
+      <div className="mt-1 text-2xl font-black text-gray-900">{value}</div>
+      {hint ? <div className="mt-1 text-xs text-gray-500">{hint}</div> : null}
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const s = String(status || "").toLowerCase();
+  const isPublished = s === "published";
+
+  return (
+    <span
+      className={[
+        "inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold",
+        isPublished ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700",
+      ].join(" ")}
+    >
+      {isPublished ? "Published" : "Draft"}
+    </span>
+  );
+}
+
+function PaginationButton({ children, active = false, disabled = false, className = "", ...props }) {
+  return (
+    <button
+      type="button"
+      {...props}
+      disabled={disabled}
+      className={[
+        "rounded-xl px-3 py-2 text-sm font-semibold transition",
+        active ? "bg-orange-500 text-white" : "border bg-white text-gray-700 hover:bg-orange-50",
+        disabled ? "cursor-not-allowed opacity-50 hover:bg-white" : "",
+        className,
+      ].join(" ")}
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function AdminCourses() {
   const router = useRouter();
 
   const [courses, setCourses] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [form, setForm] = useState({
     id: null,
     title: "",
     description: "",
-    category: "learning",
     status: "draft",
     thumbnailFile: null,
     thumbnailPreview: null,
@@ -59,6 +111,7 @@ export default function AdminCourses() {
   const [openCourseId, setOpenCourseId] = useState(null);
   const [sessions, setSessions] = useState([]);
   const [lessonsBySession, setLessonsBySession] = useState({});
+  const [currentPage, setCurrentPage] = useState(1);
 
   const token = useMemo(() => getAuthToken(), []);
 
@@ -66,6 +119,19 @@ export default function AdminCourses() {
     fetchCourses();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setSearchQuery(searchInput.trim().toLowerCase());
+      setCurrentPage(1);
+    }, 200);
+
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  function resetPage() {
+    setCurrentPage(1);
+  }
 
   async function fetchCourses() {
     setLoading(true);
@@ -84,8 +150,6 @@ export default function AdminCourses() {
       }
 
       const data = await res.json().catch(() => null);
-      console.log("fetchCourses response:", res.status, data);
-
       const normalized = normalizeCoursesPayload(data);
       setCourses(normalized);
     } catch (err) {
@@ -124,7 +188,7 @@ export default function AdminCourses() {
       const fd = new FormData();
       fd.append("title", form.title);
       fd.append("description", form.description);
-      fd.append("category", form.category);
+      fd.append("category", "learning");
       fd.append("status", form.status);
 
       if (form.thumbnailFile) {
@@ -168,7 +232,6 @@ export default function AdminCourses() {
         id: null,
         title: "",
         description: "",
-        category: "learning",
         status: "draft",
         thumbnailFile: null,
         thumbnailPreview: null,
@@ -183,7 +246,6 @@ export default function AdminCourses() {
       id: course.id,
       title: course.title || "",
       description: course.description || "",
-      category: course.category || "learning",
       status: course.status || "draft",
       thumbnailFile: null,
       thumbnailPreview: buildImageSrc(API_ROOT, currentThumbnail),
@@ -214,12 +276,16 @@ export default function AdminCourses() {
   }
 
   async function loadSessions(courseId) {
-    setOpenCourseId(courseId === openCourseId ? null : courseId);
+    const nextOpenId = courseId === openCourseId ? null : courseId;
+    setOpenCourseId(nextOpenId);
 
-    if (courseId === openCourseId) {
+    if (nextOpenId === null) {
       setSessions([]);
       return;
     }
+
+    setSessions([]);
+    setLessonsBySession({});
 
     try {
       const res = await fetch(`${API_ROOT}/api/admin/courses/${courseId}/sessions`, {
@@ -334,78 +400,113 @@ export default function AdminCourses() {
   }
 
   const courseList = Array.isArray(courses) ? courses : [];
+  const publishedCount = courseList.filter((c) => String(c.status).toLowerCase() === "published").length;
+  const draftCount = courseList.length - publishedCount;
+
+  const filteredCourses = courseList.filter((c) => {
+    const q = searchQuery;
+    if (!q) return true;
+
+    const title = String(c.title || "").toLowerCase();
+    const desc = String(c.description || "").toLowerCase();
+    const status = String(c.status || "").toLowerCase();
+
+    return title.includes(q) || desc.includes(q) || status.includes(q);
+  });
+
+  const totalPages = Math.max(1, Math.ceil(filteredCourses.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = (safePage - 1) * PAGE_SIZE;
+  const paginatedCourses = filteredCourses.slice(startIndex, startIndex + PAGE_SIZE);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   return (
     <div className="min-h-screen flex bg-[#f6f6f6]">
       <Sidebar />
 
-      <div className="flex-1 p-8 max-h-screen overflow-auto">
+      <div className="flex-1 max-h-screen overflow-auto p-8">
         <Topbar />
 
-        <div className="max-w-5xl mx-auto space-y-6">
-          <form onSubmit={handleSubmit} className="bg-white p-6 rounded-xl shadow space-y-4">
-            <h2 className="text-xl font-bold">
-              {form.id ? "Edit Course" : "Buat Course Baru"}
-            </h2>
+        <div className="mx-auto max-w-6xl space-y-6">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+            <MiniStat label="Total Course" value={courseList.length} hint="Semua course tersimpan" />
+            <MiniStat label="Published" value={publishedCount} hint="Siap dipakai user" />
+            <MiniStat label="Draft" value={draftCount} hint="Masih perlu dipoles" />
+          </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="md:col-span-2 space-y-3">
-                <input
-                  className="w-full px-3 py-2 border rounded"
-                  placeholder="Judul course"
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  required
-                />
-
-                <textarea
-                  rows={4}
-                  className="w-full px-3 py-2 border rounded"
-                  placeholder="Deskripsi"
-                  value={form.description}
-                  onChange={(e) => setForm({ ...form, description: e.target.value })}
-                />
-
-                <div className="flex gap-3">
-                  <select
-                    value={form.status}
-                    onChange={(e) => setForm({ ...form, status: e.target.value })}
-                    className="px-3 py-2 border rounded"
-                  >
-                    <option value="draft">Draft</option>
-                    <option value="published">Published</option>
-                  </select>
-                </div>
+          <form onSubmit={handleSubmit} className="rounded-3xl border bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">
+                  {form.id ? "Edit Course" : "Buat Course Baru"}
+                </h2>
+                <p className="mt-1 text-sm text-gray-500">
+                  Atur judul, deskripsi, status, dan thumbnail course.
+                </p>
               </div>
 
-              <div className="space-y-3">
-                <div className="text-sm font-medium">Thumbnail</div>
+              <div className="rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
+                {form.id ? "Mode Edit" : "Mode Baru"}
+              </div>
+            </div>
 
-                <input
-                  key={form.id || "new"}
-                  type="file"
-                  accept="image/*"
-                  onChange={onFileChange}
-                />
-
-                {form.thumbnailFile && (
-                  <div className="text-xs text-gray-500">
-                    File terpilih: {form.thumbnailFile.name}
-                  </div>
-                )}
-
-                {form.thumbnailPreview && (
-                  <img
-                    src={form.thumbnailPreview}
-                    alt="preview"
-                    className="w-full h-36 object-cover rounded"
+            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1.2fr_0.8fr]">
+              <div className="space-y-4">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Judul</label>
+                  <input
+                    className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-orange-400"
+                    placeholder="Judul course"
+                    value={form.title}
+                    onChange={(e) => setForm({ ...form, title: e.target.value })}
+                    required
                   />
-                )}
+                </div>
 
-                <div className="flex gap-2 mt-3">
+                <div>
+                  <label className="text-sm font-medium text-gray-700">Deskripsi</label>
+                  <textarea
+                    rows={5}
+                    className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-orange-400"
+                    placeholder="Deskripsi course"
+                    value={form.description}
+                    onChange={(e) => setForm({ ...form, description: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Kategori</label>
+                    <input
+                      className="mt-1 w-full rounded-2xl border bg-gray-100 px-4 py-3 text-gray-500 outline-none"
+                      value="learning"
+                      disabled
+                      readOnly
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium text-gray-700">Status</label>
+                    <select
+                      value={form.status}
+                      onChange={(e) => setForm({ ...form, status: e.target.value })}
+                      className="mt-1 w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-orange-400"
+                    >
+                      <option value="draft">Draft</option>
+                      <option value="published">Published</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="flex gap-3 pt-2">
                   <button
                     type="submit"
-                    className="bg-orange-500 text-white px-4 py-2 rounded font-bold"
+                    className="rounded-2xl bg-orange-500 px-5 py-3 font-semibold text-white transition hover:bg-orange-600"
                   >
                     {form.id ? "Simpan Perubahan" : "Buat Course"}
                   </button>
@@ -413,212 +514,326 @@ export default function AdminCourses() {
                   <button
                     type="button"
                     onClick={resetForm}
-                    className="bg-gray-200 px-4 py-2 rounded"
+                    className="rounded-2xl border bg-white px-5 py-3 font-semibold text-gray-700 transition hover:bg-gray-50"
                   >
                     Reset
                   </button>
                 </div>
               </div>
+
+              <div>
+                <div className="rounded-3xl border bg-[#fffaf5] p-4">
+                  <div className="text-sm font-semibold text-gray-700">Thumbnail</div>
+
+                  <input
+                    key={form.id || "new"}
+                    type="file"
+                    accept="image/*"
+                    onChange={onFileChange}
+                    className="mt-3 w-full rounded-2xl border bg-white px-4 py-3"
+                  />
+
+                  {form.thumbnailFile && (
+                    <div className="mt-2 text-xs text-gray-500">
+                      File terpilih: {form.thumbnailFile.name}
+                    </div>
+                  )}
+
+                  <div className="mt-4 overflow-hidden rounded-2xl border bg-white">
+                    {form.thumbnailPreview ? (
+                      <img
+                        src={form.thumbnailPreview}
+                        alt="preview"
+                        className="h-48 w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-48 items-center justify-center text-sm text-gray-500">
+                        Preview thumbnail
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </form>
 
-          <div className="bg-white p-6 rounded-xl shadow">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-bold">Daftar Course</h3>
-              <div className="text-sm text-gray-500">{courseList.length} course</div>
+          <div className="rounded-3xl border bg-white p-6 shadow-sm">
+            <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h3 className="text-lg font-bold text-gray-900">Daftar Course</h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Cari course lalu buka per halaman 5 item.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-3 md:flex-row md:items-center">
+                <input
+                  value={searchInput}
+                  onChange={(e) => {
+                    setSearchInput(e.target.value);
+                    resetPage();
+                  }}
+                  placeholder="Cari course..."
+                  className="w-full rounded-2xl border px-4 py-3 outline-none focus:ring-2 focus:ring-orange-400 md:w-80"
+                />
+                <div className="text-sm text-gray-500">{filteredCourses.length} course ditemukan</div>
+              </div>
             </div>
 
             {loading ? (
-              <div>Memuat…</div>
+              <div className="rounded-2xl border bg-orange-50 p-6 text-sm text-gray-600">
+                Memuat…
+              </div>
+            ) : filteredCourses.length === 0 ? (
+              <div className="rounded-2xl border bg-orange-50 p-6 text-sm text-gray-600">
+                Tidak ada course yang cocok dengan pencarian.
+              </div>
             ) : (
-              <div className="space-y-4">
-                {courseList.map((c) => {
-                  const thumb = c.thumbnail_url || c.thumbnail || "";
-                  const imgSrc = thumb ? buildImageSrc(API_ROOT, thumb) : null;
+              <>
+                <div className="space-y-4">
+                  {paginatedCourses.map((c) => {
+                    const thumb = c.thumbnail_url || c.thumbnail || "";
+                    const imgSrc = thumb ? buildImageSrc(API_ROOT, thumb) : null;
 
-                  return (
-                    <div key={c.id} className="p-4 border rounded bg-white">
-                      <div className="md:flex gap-4">
-                        <div className="w-full md:w-48">
-                          {imgSrc ? (
-                            <img
-                              src={imgSrc}
-                              alt={c.title}
-                              className="w-full h-28 object-cover rounded border"
-                            />
-                          ) : (
-                            <div className="w-full h-28 rounded bg-gray-100 flex items-center justify-center text-xs text-gray-500">
-                              Tidak ada thumbnail
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex-1">
-                          <div className="flex items-start justify-between">
-                            <div>
-                              <div className="font-bold text-lg">{c.title}</div>
-                              <div className="text-sm text-gray-500">{c.category}</div>
-                              <div className="text-sm text-gray-700 mt-2">
-                                {(c.description || "").slice(0, 220)}
+                    return (
+                      <div
+                        key={c.id}
+                        className="overflow-hidden rounded-3xl border bg-white shadow-sm transition hover:shadow-md"
+                      >
+                        <div className="grid grid-cols-1 md:grid-cols-[260px_1fr]">
+                          <div className="h-56 bg-gray-100">
+                            {imgSrc ? (
+                              <img
+                                src={imgSrc}
+                                alt={c.title}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-full items-center justify-center text-xs text-gray-500">
+                                Tidak ada thumbnail
                               </div>
-                            </div>
-
-                            <div className="flex flex-col items-end gap-2">
-                              <SmallBtn
-                                className="bg-blue-500 text-white"
-                                onClick={() => startEdit(c)}
-                              >
-                                Edit
-                              </SmallBtn>
-
-                              <SmallBtn
-                                className="bg-red-500 text-white"
-                                onClick={() => removeCourse(c.id)}
-                              >
-                                Hapus
-                              </SmallBtn>
-
-                              <SmallBtn
-                                className="bg-purple-500 text-white"
-                                onClick={() => router.push(`/admin/materials?courseId=${c.id}`)}
-                              >
-                                Kelola Materi
-                              </SmallBtn>
-                            </div>
+                            )}
                           </div>
 
-                          {openCourseId === c.id && (
-                            <div className="mt-4 space-y-3">
-                              <div className="flex gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => createSession(c.id)}
-                                  className="px-3 py-1 bg-orange-500 text-white rounded"
-                                >
-                                  Buat Session
-                                </button>
+                          <div className="p-5">
+                            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                              <div className="max-w-2xl">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h4 className="text-2xl font-black text-gray-900">{c.title}</h4>
+                                  <StatusBadge status={c.status} />
+                                </div>
+
+                                <div className="mt-1 text-sm text-gray-500">
+                                  {c.category || "learning"}
+                                </div>
+
+                                <div className="mt-3 text-sm leading-6 text-gray-700">
+                                  {(c.description || "").slice(0, 260) || "Tidak ada deskripsi."}
+                                </div>
                               </div>
 
-                              {sessions.length === 0 ? (
-                                <div className="text-sm text-gray-500 mt-2">
-                                  Belum ada session
+                              <div className="flex flex-wrap gap-2 md:flex-col md:items-end">
+                                <SmallBtn
+                                  className="bg-blue-500 text-white hover:bg-blue-600"
+                                  onClick={() => startEdit(c)}
+                                >
+                                  Edit
+                                </SmallBtn>
+
+                                <SmallBtn
+                                  className="bg-red-500 text-white hover:bg-red-600"
+                                  onClick={() => removeCourse(c.id)}
+                                >
+                                  Hapus
+                                </SmallBtn>
+
+                                <SmallBtn
+                                  className="bg-purple-500 text-white hover:bg-purple-600"
+                                  onClick={() => router.push(`/admin/materials?courseId=${c.id}`)}
+                                >
+                                  Kelola Materi
+                                </SmallBtn>
+                              </div>
+                            </div>
+
+                            {openCourseId === c.id && (
+                              <div className="mt-6 rounded-3xl border bg-orange-50/70 p-4">
+                                <div className="flex items-center justify-between gap-3">
+                                  <div>
+                                    <div className="text-sm font-bold text-gray-900">Session Course</div>
+                                    <div className="text-xs text-gray-500">
+                                      Klik lesson untuk melihat isi materi di backend admin.
+                                    </div>
+                                  </div>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => createSession(c.id)}
+                                    className="rounded-2xl bg-orange-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-orange-600"
+                                  >
+                                    Buat Session
+                                  </button>
                                 </div>
-                              ) : (
-                                <div className="mt-2 space-y-2">
-                                  {sessions.map((s) => (
-                                    <div key={s.id} className="p-3 bg-gray-50 rounded border">
-                                      <div className="flex justify-between items-center">
-                                        <div>
-                                          <div className="font-semibold">{s.title}</div>
-                                          <div className="text-xs text-gray-500">
-                                            session id: {s.id}
-                                          </div>
-                                        </div>
 
-                                        <div className="flex gap-2">
-                                          <SmallBtn
-                                            className="bg-blue-400 text-white"
-                                            onClick={() => {
-                                              const newTitle = prompt("Edit session:", s.title);
-                                              if (newTitle) {
-                                                fetch(`${API_ROOT}/api/admin/sessions/${s.id}`, {
-                                                  method: "PUT",
-                                                  headers: {
-                                                    "Content-Type": "application/json",
-                                                    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                                                  },
-                                                  body: JSON.stringify({ title: newTitle }),
-                                                }).then(() => loadSessions(c.id));
-                                              }
-                                            }}
-                                          >
-                                            Edit
-                                          </SmallBtn>
-
-                                          <SmallBtn
-                                            className="bg-red-400 text-white"
-                                            onClick={() => deleteSession(s.id)}
-                                          >
-                                            Hapus
-                                          </SmallBtn>
-
-                                          <SmallBtn
-                                            className="bg-indigo-500 text-white"
-                                            onClick={() => {
-                                              loadLessons(s.id);
-                                            }}
-                                          >
-                                            Lessons
-                                          </SmallBtn>
-
-                                          <SmallBtn
-                                            className="bg-green-500 text-white"
-                                            onClick={() => createLesson(s.id)}
-                                          >
-                                            Buat Lesson
-                                          </SmallBtn>
-                                        </div>
-                                      </div>
-
-                                      <div className="mt-3 space-y-2">
-                                        {(lessonsBySession[s.id] || []).map((L) => (
-                                          <div
-                                            key={L.id}
-                                            className="flex justify-between items-center bg-white p-2 rounded border"
-                                          >
-                                            <div>
-                                              <div className="font-medium">{L.title}</div>
-                                              <div className="text-xs text-gray-500">
-                                                {(L.content || "").slice(0, 80)}
-                                              </div>
+                                <div className="mt-4 space-y-3">
+                                  {sessions.length === 0 ? (
+                                    <div className="rounded-2xl border bg-white p-4 text-sm text-gray-500">
+                                      Belum ada session
+                                    </div>
+                                  ) : (
+                                    sessions.map((s) => (
+                                      <div
+                                        key={s.id}
+                                        className="rounded-3xl border bg-white p-4 shadow-sm"
+                                      >
+                                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                          <div>
+                                            <div className="font-semibold text-gray-900">
+                                              {s.title}
                                             </div>
+                                            <div className="text-xs text-gray-500">
+                                              Session ID: {s.id}
+                                            </div>
+                                          </div>
 
-                                            <div className="flex gap-2">
-                                              <SmallBtn
-                                                className="bg-blue-400 text-white"
-                                                onClick={() => {
-                                                  const newTitle = prompt("Judul baru:", L.title);
-                                                  if (!newTitle) return;
-                                                  const newContent = prompt("Isi baru:", L.content || "");
-
-                                                  fetch(`${API_ROOT}/api/admin/lessons/${L.id}`, {
+                                          <div className="flex flex-wrap gap-2">
+                                            <SmallBtn
+                                              className="bg-blue-400 text-white hover:bg-blue-500"
+                                              onClick={() => {
+                                                const newTitle = prompt("Edit session:", s.title);
+                                                if (newTitle) {
+                                                  fetch(`${API_ROOT}/api/admin/sessions/${s.id}`, {
                                                     method: "PUT",
                                                     headers: {
                                                       "Content-Type": "application/json",
                                                       ...(token ? { Authorization: `Bearer ${token}` } : {}),
                                                     },
-                                                    body: JSON.stringify({
-                                                      title: newTitle,
-                                                      content: newContent,
-                                                    }),
-                                                  }).then(() => loadLessons(s.id));
-                                                }}
-                                              >
-                                                Edit
-                                              </SmallBtn>
+                                                    body: JSON.stringify({ title: newTitle }),
+                                                  }).then(() => loadSessions(c.id));
+                                                }
+                                              }}
+                                            >
+                                              Edit
+                                            </SmallBtn>
 
-                                              <SmallBtn
-                                                className="bg-red-400 text-white"
-                                                onClick={() => deleteLesson(L)}
-                                              >
-                                                Hapus
-                                              </SmallBtn>
-                                            </div>
+                                            <SmallBtn
+                                              className="bg-red-400 text-white hover:bg-red-500"
+                                              onClick={() => deleteSession(s.id)}
+                                            >
+                                              Hapus
+                                            </SmallBtn>
+
+                                            <SmallBtn
+                                              className="bg-indigo-500 text-white hover:bg-indigo-600"
+                                              onClick={() => loadLessons(s.id)}
+                                            >
+                                              Lessons
+                                            </SmallBtn>
+
+                                            <SmallBtn
+                                              className="bg-green-500 text-white hover:bg-green-600"
+                                              onClick={() => createLesson(s.id)}
+                                            >
+                                              Buat Lesson
+                                            </SmallBtn>
                                           </div>
-                                        ))}
+                                        </div>
+
+                                        <div className="mt-4 space-y-2">
+                                          {(lessonsBySession[s.id] || []).map((L) => (
+                                            <div
+                                              key={L.id}
+                                              className="flex flex-col gap-3 rounded-2xl border bg-gray-50 p-3 md:flex-row md:items-center md:justify-between"
+                                            >
+                                              <div>
+                                                <div className="font-medium text-gray-900">
+                                                  {L.title}
+                                                </div>
+                                                <div className="mt-1 text-xs text-gray-500">
+                                                  {(L.content || "").slice(0, 80)}
+                                                </div>
+                                              </div>
+
+                                              <div className="flex gap-2">
+                                                <SmallBtn
+                                                  className="bg-blue-400 text-white hover:bg-blue-500"
+                                                  onClick={() => {
+                                                    const newTitle = prompt("Judul baru:", L.title);
+                                                    if (!newTitle) return;
+                                                    const newContent = prompt("Isi baru:", L.content || "");
+
+                                                    fetch(`${API_ROOT}/api/admin/lessons/${L.id}`, {
+                                                      method: "PUT",
+                                                      headers: {
+                                                        "Content-Type": "application/json",
+                                                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                                                      },
+                                                      body: JSON.stringify({
+                                                        title: newTitle,
+                                                        content: newContent,
+                                                      }),
+                                                    }).then(() => loadLessons(s.id));
+                                                  }}
+                                                >
+                                                  Edit
+                                                </SmallBtn>
+
+                                                <SmallBtn
+                                                  className="bg-red-400 text-white hover:bg-red-500"
+                                                  onClick={() => deleteLesson(L)}
+                                                >
+                                                  Hapus
+                                                </SmallBtn>
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
                                       </div>
-                                    </div>
-                                  ))}
+                                    ))
+                                  )}
                                 </div>
-                              )}
-                            </div>
-                          )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-6 flex flex-col gap-3 border-t pt-5 md:flex-row md:items-center md:justify-between">
+                  <div className="text-sm text-gray-500">
+                    Halaman <span className="font-semibold text-gray-900">{safePage}</span> dari{" "}
+                    <span className="font-semibold text-gray-900">{totalPages}</span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    <PaginationButton
+                      onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                      disabled={safePage === 1}
+                    >
+                      Sebelumnya
+                    </PaginationButton>
+
+                    {Array.from({ length: totalPages }, (_, idx) => idx + 1).map((page) => (
+                      <PaginationButton
+                        key={page}
+                        active={page === safePage}
+                        onClick={() => setCurrentPage(page)}
+                      >
+                        {page}
+                      </PaginationButton>
+                    ))}
+
+                    <PaginationButton
+                      onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                      disabled={safePage === totalPages}
+                    >
+                      Berikutnya
+                    </PaginationButton>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </div>

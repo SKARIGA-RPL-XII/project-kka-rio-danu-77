@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/router";
-import { getUser, getToken, removeAuth } from "../utils/auth";
+import { getUser, getToken } from "../utils/auth";
 
 const API_ROOT = (process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000").replace(/\/+$/, "");
 
@@ -21,6 +21,46 @@ function avatarSrc(photo) {
   if (/^https?:\/\//i.test(t)) return t;
   if (t.startsWith("/")) return API_ROOT + t;
   return `${API_ROOT}/uploads/avatars/${t}`;
+}
+
+function normalizeLearningProgress(data, pointsValue = 0) {
+  if (!data || typeof data !== "object") {
+    return Math.max(0, Math.min(100, Number(pointsValue) % 100));
+  }
+
+  if (typeof data.progress_percent === "number") {
+    const learning = Math.max(0, Math.min(100, Math.round(data.progress_percent)));
+    if (learning > 0) return learning;
+  }
+
+  const rows = Array.isArray(data.progress) ? data.progress : [];
+  if (rows.length > 0) {
+    const sum = rows.reduce((total, row) => total + (Number(row.progress_percent) || 0), 0);
+    const avg = Math.round(sum / rows.length);
+    if (avg > 0) return avg;
+  }
+
+  return Math.max(0, Math.min(100, Number(pointsValue) % 100));
+}
+
+function normalizePointsProgress(data) {
+  if (!data || typeof data !== "object") return { points: 0, level: 1 };
+
+  if (typeof data.points === "number" && typeof data.level === "number") {
+    return {
+      points: Number(data.points || 0),
+      level: Number(data.level || 1),
+    };
+  }
+
+  if (data.points && typeof data.points === "object") {
+    return {
+      points: Number(data.points.points || 0),
+      level: Number(data.points.level || 1),
+    };
+  }
+
+  return { points: 0, level: 1 };
 }
 
 function StatCard({ label, value, hint, accent = "orange" }) {
@@ -70,14 +110,14 @@ export default function DashboardPage() {
 
           if (r1.ok) {
             const j = await r1.json();
-            if (j?.user) {
-              setUser(j.user);
+            const u = j?.user || j;
+            if (u) {
+              setUser(u);
               try {
-                localStorage.setItem("miespanol_user", JSON.stringify(j.user));
+                localStorage.setItem("miespanol_user", JSON.stringify(u));
               } catch {}
             }
           } else if (r1.status === 401) {
-            removeAuth?.();
             router.replace("/login");
             return;
           }
@@ -85,31 +125,38 @@ export default function DashboardPage() {
           console.warn("profile fetch failed", e);
         }
 
+        let progressData = null;
         try {
           const r2 = await fetch(`${API_ROOT}/api/progress`, {
             headers: { Authorization: `Bearer ${token}` },
           });
 
           if (r2.ok) {
-            const jb = await r2.json();
-            const progressRows = Array.isArray(jb.progress) ? jb.progress : [];
-
-            if (progressRows.length > 0) {
-              const sum = progressRows.reduce(
-                (s, it) => s + (Number(it.progress_percent) || 0),
-                0
-              );
-              setProgressPercent(Math.round(sum / progressRows.length));
-            } else {
-              setProgressPercent(0);
-            }
-
-            setPoints(jb.points?.points || 0);
-            setLevel(jb.points?.level || 1);
+            progressData = await r2.json().catch(() => null);
           }
         } catch (e) {
           console.warn("progress fetch failed", e);
         }
+
+        let pointsData = null;
+        try {
+          const r3 = await fetch(`${API_ROOT}/api/minigames/progress`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (r3.ok) {
+            pointsData = await r3.json().catch(() => null);
+          }
+        } catch (e) {
+          console.warn("points fetch failed", e);
+        }
+
+        const normalizedPoints = normalizePointsProgress(pointsData);
+        setPoints(normalizedPoints.points);
+        setLevel(normalizedPoints.level);
+
+        const progressValue = normalizeLearningProgress(progressData, normalizedPoints.points);
+        setProgressPercent(progressValue);
       } finally {
         setLoading(false);
       }
@@ -117,15 +164,6 @@ export default function DashboardPage() {
 
     init();
   }, [router, token]);
-
-  function handleLogout() {
-    removeAuth?.();
-    try {
-      localStorage.removeItem("miespanol_token");
-      localStorage.removeItem("miespanol_user");
-    } catch {}
-    router.push("/login");
-  }
 
   if (loading) {
     return (
@@ -168,13 +206,6 @@ export default function DashboardPage() {
             >
               Home
             </button>
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="rounded-2xl border bg-white px-4 py-2.5 text-sm font-semibold text-red-600 shadow-sm transition hover:shadow-md"
-            >
-              Logout
-            </button>
           </div>
         </div>
 
@@ -204,7 +235,7 @@ export default function DashboardPage() {
               <button
                 type="button"
                 onClick={() => router.push("/courses")}
-                className="w-full rounded-2xl bg-white px-4 py-3 font-semibold text-gray-900 border transition hover:bg-orange-50"
+                className="w-full rounded-2xl border bg-white px-4 py-3 font-semibold text-gray-900 transition hover:bg-orange-50"
               >
                 Lanjut Course
               </button>
@@ -251,54 +282,57 @@ export default function DashboardPage() {
             </div>
 
             <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
-              <StatCard label="Level" value={level} hint="Naik lewat progress dan XP" />
-              <StatCard label="Poin" value={points} hint="Didapat dari belajar dan game" accent="amber" />
+              <StatCard label="Level" value={level} hint="Naik lewat XP" />
+              <StatCard
+                label="Poin"
+                value={points}
+                hint="Didapat dari belajar dan game"
+                accent="amber"
+              />
               <StatCard label="Status" value="Aktif" hint="Akun siap digunakan" accent="gray" />
             </div>
           </div>
         </div>
 
         <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-2">
-          <div className="rounded-3xl border bg-white p-7 shadow-sm transition hover:shadow-md">
+          <div className="rounded-3xl border bg-white p-7 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-100 text-2xl">
-                📚
+                📊
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">Pembelajaran</h2>
+                <h2 className="text-2xl font-bold text-gray-900">Ringkasan Aktivitas</h2>
                 <p className="text-sm text-gray-500">
-                  Buka course, lanjut session, lalu kerjakan lesson satu per satu.
+                  Lihat status singkat dari akun dan perkembanganmu.
                 </p>
               </div>
             </div>
 
-            <button
-              onClick={() => router.push("/courses")}
-              className="mt-5 rounded-2xl bg-orange-500 px-5 py-3 font-semibold text-white transition hover:bg-orange-600"
-            >
-              Buka Course
-            </button>
+            <div className="mt-5 space-y-3 rounded-2xl bg-orange-50 p-4 text-sm text-gray-700">
+              <p>• Belajar bisa dilanjutkan dari course yang tersedia.</p>
+              <p>• Jawaban benar di minigame menambah poin dan level.</p>
+              <p>• Profil bisa diperbarui kapan saja dari halaman profil.</p>
+            </div>
           </div>
 
-          <div className="rounded-3xl border bg-white p-7 shadow-sm transition hover:shadow-md">
+          <div className="rounded-3xl border bg-white p-7 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-100 text-2xl">
-                🎮
+                ⭐
               </div>
               <div>
-                <h2 className="text-2xl font-bold text-gray-900">Minigame</h2>
+                <h2 className="text-2xl font-bold text-gray-900">Status Perkembangan</h2>
                 <p className="text-sm text-gray-500">
-                  Main kuis pilihan ganda untuk nambah poin.
+                  Ringkasan yang cocok untuk melihat posisi akun saat ini.
                 </p>
               </div>
             </div>
 
-            <button
-              onClick={() => router.push("/minigames")}
-              className="mt-5 rounded-2xl bg-amber-500 px-5 py-3 font-semibold text-white transition hover:bg-amber-600"
-            >
-              Main Sekarang
-            </button>
+            <div className="mt-5 grid grid-cols-3 gap-3">
+              <StatCard label="Progress" value={`${progressPercent}%`} accent="orange" />
+              <StatCard label="Level" value={level} accent="amber" />
+              <StatCard label="Poin" value={points} accent="gray" />
+            </div>
           </div>
         </div>
       </div>

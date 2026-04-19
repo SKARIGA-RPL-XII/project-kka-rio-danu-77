@@ -48,9 +48,6 @@ export default function ProfilePage() {
   const [saving, setSaving] = useState(false);
 
   const [user, setUser] = useState(null);
-  const [progressPercent, setProgressPercent] = useState(0);
-  const [points, setPoints] = useState(0);
-  const [level, setLevel] = useState(1);
 
   const [form, setForm] = useState({
     name: "",
@@ -91,39 +88,20 @@ export default function ProfilePage() {
 
         if (r1.ok) {
           const j = await r1.json();
-          if (j?.user) {
-            setUser(j.user);
+          const u = j?.user || j || null;
+
+          if (u) {
+            setUser(u);
             setForm({
-              name: j.user.name || "",
+              name: u.name || "",
               photoFile: null,
-              photoPreview: j.user.photo || "",
+              photoPreview: u.photo || "",
             });
+
             try {
-              localStorage.setItem("miespanol_user", JSON.stringify(j.user));
+              localStorage.setItem("miespanol_user", JSON.stringify(u));
             } catch {}
           }
-        }
-
-        const r2 = await fetch(`${API_ROOT}/api/progress`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (r2.ok) {
-          const jb = await r2.json();
-          const progressRows = Array.isArray(jb.progress) ? jb.progress : [];
-
-          if (progressRows.length > 0) {
-            const sum = progressRows.reduce(
-              (s, it) => s + (Number(it.progress_percent) || 0),
-              0
-            );
-            setProgressPercent(Math.round(sum / progressRows.length));
-          } else {
-            setProgressPercent(0);
-          }
-
-          setPoints(jb.points?.points || 0);
-          setLevel(jb.points?.level || 1);
         }
       } catch (err) {
         console.error("profile init error:", err);
@@ -133,8 +111,7 @@ export default function ProfilePage() {
     }
 
     init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [router, token]);
 
   function onPhotoChange(e) {
     const file = e.target.files && e.target.files[0];
@@ -188,6 +165,7 @@ export default function ProfilePage() {
           photoFile: null,
           photoPreview: updatedUser.photo || "",
         });
+
         try {
           localStorage.setItem("miespanol_user", JSON.stringify(updatedUser));
         } catch {}
@@ -200,15 +178,6 @@ export default function ProfilePage() {
     } finally {
       setSaving(false);
     }
-  }
-
-  function handleLogout() {
-    removeAuth?.();
-    try {
-      localStorage.removeItem("miespanol_token");
-      localStorage.removeItem("miespanol_user");
-    } catch {}
-    router.push("/login");
   }
 
   if (loading) {
@@ -242,14 +211,6 @@ export default function ProfilePage() {
               Atur nama dan foto profilmu di sini.
             </p>
           </div>
-
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="rounded-2xl bg-gray-100 px-4 py-2 font-semibold text-red-600 transition hover:bg-red-50"
-          >
-            Logout
-          </button>
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -264,17 +225,6 @@ export default function ProfilePage() {
                 <div className="text-xs text-gray-500">Akun aktif</div>
                 <div className="text-2xl font-black text-gray-900">{user.name}</div>
                 <div className="mt-1 text-sm text-gray-500">{user.email || "-"}</div>
-              </div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-2 gap-3">
-              <div className="rounded-2xl bg-orange-50 p-4">
-                <div className="text-xs text-gray-500">Level</div>
-                <div className="mt-1 text-2xl font-black text-orange-600">{level}</div>
-              </div>
-              <div className="rounded-2xl bg-amber-50 p-4">
-                <div className="text-xs text-gray-500">Poin</div>
-                <div className="mt-1 text-2xl font-black text-amber-600">{points}</div>
               </div>
             </div>
 
@@ -350,47 +300,6 @@ export default function ProfilePage() {
                 </div>
               </div>
             </form>
-          </div>
-        </div>
-
-        <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-3">
-          <div className="rounded-3xl border bg-white p-6 shadow-sm">
-            <div className="text-sm text-gray-500">Progress</div>
-            <div className="mt-2 text-3xl font-black text-gray-900">{progressPercent}%</div>
-            <div className="mt-4 h-3 w-full rounded-full bg-gray-200">
-              <div
-                className="h-3 rounded-full bg-gradient-to-r from-orange-400 to-amber-500"
-                style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="rounded-3xl border bg-white p-6 shadow-sm">
-            <div className="text-sm text-gray-500">Aksi Cepat</div>
-            <div className="mt-4 flex gap-3">
-              <button
-                type="button"
-                onClick={() => router.push("/courses")}
-                className="flex-1 rounded-2xl bg-orange-500 px-4 py-3 font-semibold text-white"
-              >
-                Kursus
-              </button>
-              <button
-                type="button"
-                onClick={() => router.push("/minigames")}
-                className="flex-1 rounded-2xl bg-amber-500 px-4 py-3 font-semibold text-white"
-              >
-                Minigame
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-3xl border bg-white p-6 shadow-sm">
-            <div className="text-sm text-gray-500">Status Akun</div>
-            <div className="mt-2 text-lg font-bold text-gray-900">Aktif</div>
-            <p className="mt-2 text-sm text-gray-500">
-              Profil ini bisa kamu pakai sebagai pusat akun user.
-            </p>
           </div>
         </div>
       </div>
