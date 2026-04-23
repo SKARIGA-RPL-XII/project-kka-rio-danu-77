@@ -172,6 +172,7 @@ export default function ProfilePage() {
       }
 
       alert("Profil berhasil disimpan");
+      router.push("/dashboard");
     } catch (err) {
       alert(err.message || "Gagal menyimpan profil");
       console.error(err);

@@ -1,5 +1,4 @@
-// frontend/pages/admin/materials.js
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Sidebar from "../../components/admin/AdminSidebar";
 import Topbar from "../../components/admin/AdminTopbar";
@@ -39,23 +38,17 @@ const lessonMeta = {
     label: "Isi materi",
     placeholder: "Tulis isi artikel/materi di sini...",
   },
-  video: {
-    label: "Link video",
-    placeholder: "Tempel link video YouTube / Vimeo di sini...",
-  },
   ppt: {
     label: "Penjelasan file",
     placeholder: "Tulis penjelasan singkat untuk file PPT / PDF...",
-  },
-  quiz: {
-    label: "Isi quiz",
-    placeholder: "Tulis soal / aturan quiz di sini...",
   },
 };
 
 export default function CourseMaterialsPage() {
   const router = useRouter();
   const token = useMemo(() => getToken(), []);
+  const successTimerRef = useRef(null);
+  const errorTimerRef = useRef(null);
 
   const courseIdParam = Array.isArray(router.query.courseId)
     ? router.query.courseId[0]
@@ -81,8 +74,25 @@ export default function CourseMaterialsPage() {
     attachmentName: "",
   });
 
+  const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
   const selectedSession =
     sessions.find((s) => Number(s.id) === Number(selectedSessionId)) || null;
+
+  function showSuccess(message) {
+    setSuccessMessage(message);
+    setErrorMessage("");
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    successTimerRef.current = setTimeout(() => setSuccessMessage(""), 2500);
+  }
+
+  function showError(message) {
+    setErrorMessage(message);
+    setSuccessMessage("");
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setErrorMessage(""), 3500);
+  }
 
   async function fetchCourseData() {
     if (!courseIdParam) return;
@@ -117,6 +127,7 @@ export default function CourseMaterialsPage() {
       setSessions([]);
       setSelectedSessionId(null);
       setLessons([]);
+      showError(err.message || "Gagal memuat data course");
     } finally {
       setLoading(false);
     }
@@ -133,6 +144,7 @@ export default function CourseMaterialsPage() {
     } catch (err) {
       console.error(err);
       setLessons([]);
+      showError(err.message || "Gagal memuat pembelajaran");
     }
   }
 
@@ -148,6 +160,13 @@ export default function CourseMaterialsPage() {
     fetchLessons(selectedSessionId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedSessionId]);
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
 
   function resetSessionForm() {
     setSessionForm({ id: null, title: "" });
@@ -167,7 +186,7 @@ export default function CourseMaterialsPage() {
   async function submitSession(e) {
     e.preventDefault();
 
-    if (!sessionForm.title.trim()) return alert("Judul sesi wajib diisi");
+    if (!sessionForm.title.trim()) return showError("Judul sesi wajib diisi");
 
     try {
       const isEdit = Boolean(sessionForm.id);
@@ -186,9 +205,9 @@ export default function CourseMaterialsPage() {
         }),
       });
 
-      resetSessionForm();
-
       const savedSession = body?.session || null;
+
+      resetSessionForm();
       await fetchCourseData();
 
       if (savedSession?.id) {
@@ -196,16 +215,18 @@ export default function CourseMaterialsPage() {
         await fetchLessons(savedSession.id);
         resetLessonForm();
       }
+
+      showSuccess(isEdit ? "Sesi berhasil diperbarui." : "Sesi berhasil ditambahkan.");
     } catch (err) {
-      alert(err.message || "Gagal simpan sesi");
+      showError(err.message || "Gagal simpan sesi");
     }
   }
 
   async function submitLesson(e) {
     e.preventDefault();
 
-    if (!selectedSessionId) return alert("Pilih sesi dulu");
-    if (!lessonForm.title.trim()) return alert("Judul pembelajaran wajib diisi");
+    if (!selectedSessionId) return showError("Pilih sesi dulu");
+    if (!lessonForm.title.trim()) return showError("Judul pembelajaran wajib diisi");
 
     try {
       const isEdit = Boolean(lessonForm.id);
@@ -231,8 +252,10 @@ export default function CourseMaterialsPage() {
       resetLessonForm();
       await fetchLessons(selectedSessionId);
       await fetchCourseData();
+
+      showSuccess(isEdit ? "Pembelajaran berhasil diperbarui." : "Pembelajaran berhasil ditambahkan.");
     } catch (err) {
-      alert(err.message || "Gagal simpan pembelajaran");
+      showError(err.message || "Gagal simpan pembelajaran");
     }
   }
 
@@ -251,8 +274,9 @@ export default function CourseMaterialsPage() {
       }
 
       await fetchCourseData();
+      showSuccess("Sesi berhasil dihapus.");
     } catch (err) {
-      alert(err.message || "Gagal hapus sesi");
+      showError(err.message || "Gagal hapus sesi");
     }
   }
 
@@ -267,8 +291,9 @@ export default function CourseMaterialsPage() {
 
       await fetchLessons(selectedSessionId);
       await fetchCourseData();
+      showSuccess("Pembelajaran berhasil dihapus.");
     } catch (err) {
-      alert(err.message || "Gagal hapus pembelajaran");
+      showError(err.message || "Gagal hapus pembelajaran");
     }
   }
 
@@ -312,6 +337,18 @@ export default function CourseMaterialsPage() {
         <Topbar />
 
         <div className="max-w-7xl mx-auto space-y-6">
+          {successMessage && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-sm">
+              {successMessage}
+            </div>
+          )}
+
+          {errorMessage && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
+              {errorMessage}
+            </div>
+          )}
+
           <div className="flex items-center justify-between">
             <div>
               <button
@@ -466,9 +503,7 @@ export default function CourseMaterialsPage() {
                     className="border rounded-xl px-4 py-2"
                   >
                     <option value="article">Artikel</option>
-                    <option value="video">Video</option>
                     <option value="ppt">PPT / PDF</option>
-                    <option value="quiz">Quiz</option>
                   </select>
 
                   <input

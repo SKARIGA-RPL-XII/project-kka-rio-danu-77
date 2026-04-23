@@ -77,11 +77,11 @@ export default function AdminUsersPage() {
     const q = search.toLowerCase().trim();
     if (!q) return true;
 
-    return (
-      String(u.name || u.username || "").toLowerCase().includes(q) ||
-      String(u.email || "").toLowerCase().includes(q) ||
-      String(u.role || "").toLowerCase().includes(q)
-    );
+    const name = String(u.name || u.username || "").toLowerCase();
+    const email = String(u.email || "").toLowerCase();
+    const role = String(u.role || "").toLowerCase();
+
+    return name.includes(q) || email.includes(q) || role.includes(q);
   });
 
   return (
@@ -105,7 +105,7 @@ export default function AdminUsersPage() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Cari user..."
+                  placeholder="Cari user / email..."
                   className="w-full rounded-2xl border px-4 py-2.5"
                 />
               </div>

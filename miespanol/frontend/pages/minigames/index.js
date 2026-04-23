@@ -594,14 +594,6 @@ export default function MinigamesPage() {
                 >
                   Ulang Soal
                 </button>
-
-                <button
-                  type="button"
-                  onClick={() => router.push("/home")}
-                  className="rounded-2xl border bg-white px-5 py-3 font-semibold text-orange-600 transition hover:bg-orange-50"
-                >
-                  Ke Home
-                </button>
               </div>
 
               {result && !result.done && (

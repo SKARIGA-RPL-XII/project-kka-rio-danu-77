@@ -1,5 +1,5 @@
 // frontend/pages/admin/courses.js
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import Sidebar from "../../components/admin/AdminSidebar";
 import Topbar from "../../components/admin/AdminTopbar";
@@ -113,7 +113,27 @@ export default function AdminCourses() {
   const [lessonsBySession, setLessonsBySession] = useState({});
   const [currentPage, setCurrentPage] = useState(1);
 
+  const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const successTimerRef = useRef(null);
+  const errorTimerRef = useRef(null);
+
   const token = useMemo(() => getAuthToken(), []);
+
+  function showSuccess(message) {
+    setSuccessMessage(message);
+    setErrorMessage("");
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    successTimerRef.current = setTimeout(() => setSuccessMessage(""), 2500);
+  }
+
+  function showError(message) {
+    setErrorMessage(message);
+    setSuccessMessage("");
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setErrorMessage(""), 3500);
+  }
 
   useEffect(() => {
     fetchCourses();
@@ -128,6 +148,13 @@ export default function AdminCourses() {
 
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
 
   function resetPage() {
     setCurrentPage(1);
@@ -155,6 +182,7 @@ export default function AdminCourses() {
     } catch (err) {
       console.error("Fetch courses error:", err);
       setCourses([]);
+      showError("Gagal memuat course");
     } finally {
       setLoading(false);
     }
@@ -182,45 +210,52 @@ export default function AdminCourses() {
   }
 
   async function handleSubmit(e) {
-    e.preventDefault();
+  e.preventDefault();
 
-    try {
-      const fd = new FormData();
-      fd.append("title", form.title);
-      fd.append("description", form.description);
-      fd.append("category", "learning");
-      fd.append("status", form.status);
+  const isEditing = !!form.id;
 
-      if (form.thumbnailFile) {
-        fd.append("thumbnail", form.thumbnailFile);
-      }
+  try {
+    const fd = new FormData();
+    fd.append("title", form.title);
+    fd.append("description", form.description);
+    fd.append("category", "learning");
+    fd.append("status", form.status);
 
-      let url = `${API_ROOT}/api/admin/courses`;
-      let method = "POST";
-
-      if (form.id) {
-        url = `${API_ROOT}/api/admin/courses/${form.id}`;
-        method = "PUT";
-      }
-
-      const res = await fetch(url, {
-        method,
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
-      });
-
-      if (!res.ok) {
-        const body = await res.json().catch(() => null);
-        throw new Error(body?.error || body?.message || "Gagal menyimpan course");
-      }
-
-      resetForm();
-      fetchCourses();
-    } catch (err) {
-      alert(err.message || "Gagal menyimpan course");
-      console.error(err);
+    if (form.thumbnailFile) {
+      fd.append("thumbnail", form.thumbnailFile);
     }
+
+    let url = `${API_ROOT}/api/admin/courses`;
+    let method = "POST";
+
+    if (isEditing) {
+      url = `${API_ROOT}/api/admin/courses/${form.id}`;
+      method = "PUT";
+    }
+
+    const res = await fetch(url, {
+      method,
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: fd,
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new Error(body?.error || body?.message || "Gagal menyimpan course");
+    }
+
+    await fetchCourses();
+
+    showSuccess(
+      isEditing ? "Course berhasil diperbarui." : "Course berhasil ditambahkan."
+    );
+
+    resetForm();
+  } catch (err) {
+    showError(err.message || "Gagal menyimpan course");
+    console.error(err);
   }
+}
 
   function resetForm() {
     setForm((prev) => {
@@ -268,9 +303,10 @@ export default function AdminCourses() {
         throw new Error(body?.error || "Gagal menghapus");
       }
 
-      fetchCourses();
+      await fetchCourses();
+      showSuccess("Course berhasil dihapus.");
     } catch (err) {
-      alert(err.message || "Gagal hapus");
+      showError(err.message || "Gagal hapus course");
       console.error(err);
     }
   }
@@ -297,6 +333,7 @@ export default function AdminCourses() {
     } catch (err) {
       console.error("loadSessions", err);
       setSessions([]);
+      showError("Gagal memuat session");
     }
   }
 
@@ -316,8 +353,9 @@ export default function AdminCourses() {
 
       if (!res.ok) throw new Error("Gagal buat session");
       await loadSessions(courseId);
+      showSuccess("Session berhasil ditambahkan.");
     } catch (err) {
-      alert(err.message || "Gagal buat session");
+      showError(err.message || "Gagal buat session");
     }
   }
 
@@ -332,8 +370,9 @@ export default function AdminCourses() {
 
       if (!res.ok) throw new Error("Gagal hapus session");
       await loadSessions(openCourseId);
+      showSuccess("Session berhasil dihapus.");
     } catch (err) {
-      alert(err.message || "Gagal hapus session");
+      showError(err.message || "Gagal hapus session");
     }
   }
 
@@ -352,6 +391,7 @@ export default function AdminCourses() {
     } catch (err) {
       console.error("loadLessons", err);
       setLessonsBySession((prev) => ({ ...prev, [sessionId]: [] }));
+      showError("Gagal memuat lesson");
     }
   }
 
@@ -378,8 +418,9 @@ export default function AdminCourses() {
 
       if (!res.ok) throw new Error("Gagal buat lesson");
       await loadLessons(sessionId);
+      showSuccess("Lesson berhasil ditambahkan.");
     } catch (err) {
-      alert(err.message || "Gagal buat lesson");
+      showError(err.message || "Gagal buat lesson");
     }
   }
 
@@ -394,8 +435,9 @@ export default function AdminCourses() {
 
       if (!res.ok) throw new Error("Gagal hapus lesson");
       await loadLessons(lesson.session_id);
+      showSuccess("Lesson berhasil dihapus.");
     } catch (err) {
-      alert(err.message || "Gagal hapus lesson");
+      showError(err.message || "Gagal hapus lesson");
     }
   }
 
@@ -433,6 +475,18 @@ export default function AdminCourses() {
         <Topbar />
 
         <div className="mx-auto max-w-6xl space-y-6">
+          {successMessage && (
+            <div className="fixed right-6 top-6 z-50 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-lg">
+              {successMessage}
+            </div>
+          )}
+
+          {errorMessage && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {errorMessage}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <MiniStat label="Total Course" value={courseList.length} hint="Semua course tersimpan" />
             <MiniStat label="Published" value={publishedCount} hint="Siap dipakai user" />
@@ -699,17 +753,30 @@ export default function AdminCourses() {
                                           <div className="flex flex-wrap gap-2">
                                             <SmallBtn
                                               className="bg-blue-400 text-white hover:bg-blue-500"
-                                              onClick={() => {
+                                              onClick={async () => {
                                                 const newTitle = prompt("Edit session:", s.title);
-                                                if (newTitle) {
-                                                  fetch(`${API_ROOT}/api/admin/sessions/${s.id}`, {
-                                                    method: "PUT",
-                                                    headers: {
-                                                      "Content-Type": "application/json",
-                                                      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                                                    },
-                                                    body: JSON.stringify({ title: newTitle }),
-                                                  }).then(() => loadSessions(c.id));
+                                                if (!newTitle) return;
+
+                                                try {
+                                                  const res = await fetch(
+                                                    `${API_ROOT}/api/admin/sessions/${s.id}`,
+                                                    {
+                                                      method: "PUT",
+                                                      headers: {
+                                                        "Content-Type": "application/json",
+                                                        ...(token
+                                                          ? { Authorization: `Bearer ${token}` }
+                                                          : {}),
+                                                      },
+                                                      body: JSON.stringify({ title: newTitle }),
+                                                    }
+                                                  );
+
+                                                  if (!res.ok) throw new Error("Gagal update session");
+                                                  await loadSessions(c.id);
+                                                  showSuccess("Session berhasil diperbarui.");
+                                                } catch (err) {
+                                                  showError(err.message || "Gagal update session");
                                                 }
                                               }}
                                             >
@@ -757,22 +824,35 @@ export default function AdminCourses() {
                                               <div className="flex gap-2">
                                                 <SmallBtn
                                                   className="bg-blue-400 text-white hover:bg-blue-500"
-                                                  onClick={() => {
+                                                  onClick={async () => {
                                                     const newTitle = prompt("Judul baru:", L.title);
                                                     if (!newTitle) return;
                                                     const newContent = prompt("Isi baru:", L.content || "");
 
-                                                    fetch(`${API_ROOT}/api/admin/lessons/${L.id}`, {
-                                                      method: "PUT",
-                                                      headers: {
-                                                        "Content-Type": "application/json",
-                                                        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-                                                      },
-                                                      body: JSON.stringify({
-                                                        title: newTitle,
-                                                        content: newContent,
-                                                      }),
-                                                    }).then(() => loadLessons(s.id));
+                                                    try {
+                                                      const res = await fetch(
+                                                        `${API_ROOT}/api/admin/lessons/${L.id}`,
+                                                        {
+                                                          method: "PUT",
+                                                          headers: {
+                                                            "Content-Type": "application/json",
+                                                            ...(token
+                                                              ? { Authorization: `Bearer ${token}` }
+                                                              : {}),
+                                                          },
+                                                          body: JSON.stringify({
+                                                            title: newTitle,
+                                                            content: newContent,
+                                                          }),
+                                                        }
+                                                      );
+
+                                                      if (!res.ok) throw new Error("Gagal update lesson");
+                                                      await loadLessons(s.id);
+                                                      showSuccess("Lesson berhasil diperbarui.");
+                                                    } catch (err) {
+                                                      showError(err.message || "Gagal update lesson");
+                                                    }
                                                   }}
                                                 >
                                                   Edit

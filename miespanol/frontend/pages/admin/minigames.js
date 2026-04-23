@@ -1,5 +1,5 @@
 // frontend/pages/admin/minigames.js
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "../../components/admin/AdminSidebar";
 import Topbar from "../../components/admin/AdminTopbar";
 
@@ -93,6 +93,12 @@ export default function AdminMinigamesPage() {
     correct_option: "A",
   });
 
+  const [successMessage, setSuccessMessage] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
+
+  const successTimerRef = useRef(null);
+  const errorTimerRef = useRef(null);
+
   useEffect(() => {
     fetchMinigames();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -106,6 +112,27 @@ export default function AdminMinigamesPage() {
 
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  useEffect(() => {
+    return () => {
+      if (successTimerRef.current) clearTimeout(successTimerRef.current);
+      if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    };
+  }, []);
+
+  function showSuccess(message) {
+    setSuccessMessage(message);
+    setErrorMessage("");
+    if (successTimerRef.current) clearTimeout(successTimerRef.current);
+    successTimerRef.current = setTimeout(() => setSuccessMessage(""), 2500);
+  }
+
+  function showError(message) {
+    setErrorMessage(message);
+    setSuccessMessage("");
+    if (errorTimerRef.current) clearTimeout(errorTimerRef.current);
+    errorTimerRef.current = setTimeout(() => setErrorMessage(""), 3500);
+  }
 
   async function fetchMinigames() {
     setLoading(true);
@@ -128,6 +155,7 @@ export default function AdminMinigamesPage() {
     } catch (err) {
       console.error("fetchMinigames error:", err);
       setMinigames([]);
+      showError("Gagal memuat minigame");
     } finally {
       setLoading(false);
     }
@@ -189,6 +217,8 @@ export default function AdminMinigamesPage() {
   async function handleSubmit(e) {
     e.preventDefault();
 
+    const isEditing = !!form.id;
+
     try {
       const fd = new FormData();
       fd.append("title", form.title);
@@ -208,7 +238,7 @@ export default function AdminMinigamesPage() {
       let url = `${API_ROOT}/api/admin/minigames`;
       let method = "POST";
 
-      if (form.id) {
+      if (isEditing) {
         url = `${API_ROOT}/api/admin/minigames/${form.id}`;
         method = "PUT";
       }
@@ -225,9 +255,11 @@ export default function AdminMinigamesPage() {
       }
 
       resetForm();
-      fetchMinigames();
+      await fetchMinigames();
+      showSuccess(isEditing ? "Minigame berhasil diperbarui." : "Minigame berhasil ditambahkan.");
     } catch (err) {
       alert(err.message || "Gagal simpan minigame");
+      showError(err.message || "Gagal simpan minigame");
       console.error(err);
     }
   }
@@ -246,9 +278,11 @@ export default function AdminMinigamesPage() {
         throw new Error(body?.error || "Gagal menghapus");
       }
 
-      fetchMinigames();
+      await fetchMinigames();
+      showSuccess("Minigame berhasil dihapus.");
     } catch (err) {
       alert(err.message || "Gagal hapus minigame");
+      showError(err.message || "Gagal hapus minigame");
       console.error(err);
     }
   }
@@ -288,6 +322,18 @@ export default function AdminMinigamesPage() {
         <Topbar />
 
         <div className="mx-auto max-w-6xl space-y-6">
+          {successMessage && (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700 shadow-sm">
+              {successMessage}
+            </div>
+          )}
+
+          {errorMessage && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 shadow-sm">
+              {errorMessage}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
             <MiniStat label="Total Minigame" value={total} hint="Semua data yang tersimpan" />
             <MiniStat label="Published" value={published} hint="Siap tampil ke user" />
